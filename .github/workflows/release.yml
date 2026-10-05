@@ -1,0 +1,26 @@
+name: Release
+# Pushing a tag vX.Y.Z builds a DRAFT release. Signing and publishing are manual,
+# on the release PC; nothing here ever signs or publishes.
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Tag matches manifest version
+        run: |
+          v=$(python -c "import json;print(json.load(open('manifest.json'))['version'])")
+          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "tag ${GITHUB_REF_NAME} != manifest $v"; exit 1; }
+      - run: python -m unittest discover -s tests
+      - run: python tools/validate.py
+        env: { PYTHONPATH: tests/fakecore }
+      - run: python tools/build_release.py dist
+      - name: Create draft release with zip and file list
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: gh release create "${GITHUB_REF_NAME}" dist/*.zip dist/files.json --draft --generate-notes --title "${GITHUB_REF_NAME}"

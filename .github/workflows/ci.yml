@@ -1,0 +1,44 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Tests
+        run: python -m unittest discover -s tests
+      - name: Validate manifest, conversions, tools.json
+        run: python tools/validate.py
+        env: { PYTHONPATH: tests/fakecore }
+      - name: Release zip builds
+        run: python tools/build_release.py dist
+
+  agreement:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: python tools/check_agreement.py
+        env: { PR_BODY: "${{ github.event.pull_request.body }}" }
+
+  risk-flags:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Summarize risky changes
+        run: python tools/risk_flags.py origin/${{ github.base_ref }} | tee "$GITHUB_STEP_SUMMARY"
