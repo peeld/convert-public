@@ -250,7 +250,7 @@ def check_due(last_check, now, hours=24):
 
 
 # ---- bundled files edited by hand ----------------------------------------------------
-LISTING = "files.json"      # the release's file list, also kept in the repo root (tools/build_release.py --listing)
+LISTING = "files.json"      # the release's file list, also kept in the repo root (written by the maintainer's release script before each release)
 
 
 def modified_files(folder):

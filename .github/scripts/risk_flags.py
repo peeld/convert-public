@@ -1,6 +1,6 @@
 """CI: flag changes in a PR that need line-by-line human review.  Prints markdown.
 
-Usage: python tools/risk_flags.py <base-ref>      (e.g. origin/main)
+Usage: python .github/scripts/risk_flags.py <base-ref>      (e.g. origin/main)
 Never fails the build: it only labels what the reviewer must read.
 """
 import re
@@ -18,7 +18,7 @@ for line in names.splitlines():
         flags.append(("HIGH", "Python %s: `%s`" % ("added" if status[0] == "A" else "changed", path)))
     if path == "convert/tools.json":
         flags.append(("HIGH", "`tools.json` changed (tool download)"))
-    if path.startswith(".github/") or path.startswith("tools/") or path == "manifest.json":
+    if path.startswith((".github/", "tools/")) or path in ("manifest.json", "files.json"):
         flags.append(("HIGH", "Repo/CI/release machinery changed: `%s`" % path))
     if path.endswith(".json") and path.startswith("convert/conversions/"):
         flags.append(("LOW", "Conversion JSON: `%s`" % path))

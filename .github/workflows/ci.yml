@@ -19,8 +19,6 @@ jobs:
       - name: Validate manifest, conversions, tools.json
         run: python tools/validate.py
         env: { PYTHONPATH: tests/fakecore }
-      - name: Release zip builds
-        run: python tools/build_release.py dist
 
   agreement:
     if: github.event_name == 'pull_request'
@@ -29,7 +27,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - run: python tools/check_agreement.py
+      - run: python .github/scripts/check_agreement.py
         env: { PR_BODY: "${{ github.event.pull_request.body }}" }
 
   risk-flags:
@@ -41,4 +39,4 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - name: Summarize risky changes
-        run: python tools/risk_flags.py origin/${{ github.base_ref }} | tee "$GITHUB_STEP_SUMMARY"
+        run: python .github/scripts/risk_flags.py origin/${{ github.base_ref }} | tee "$GITHUB_STEP_SUMMARY"
