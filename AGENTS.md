@@ -2,29 +2,35 @@
 
 This file is for coding agents changing what PeelConvert can do: adding a
 conversion, changing an existing one, adding a tool other than ffmpeg, or adding
-a new kind of Op. Read it before you touch `python/convert/`.
+a new kind of Op. Read it before you touch `convert/`.
 
-Build, packaging and release are covered in `README.md`; the work framework
-(Op, Pipeline, executor) is designed in `Work Framework.md` and documented as
-built in `core/cpp/work/README.md`. This file covers only the conversion system
-that sits on top of them.
+This repository (`convert-public`) is the Python side of PeelConvert. In the app's
+source tree it is mounted at `python/`; in an install it is the `scripts/` folder.
+Paths below are relative to this repository's root. Build, packaging and release of
+the app are covered in the app repo's `README.md`; the work framework (Op, Pipeline,
+executor) is described in its `Work Framework.md` and `core/cpp/work/README.md`.
+This file covers only the conversion system that sits on top of them.
 
-> **Reading this in an installed copy?** It ships next to `PeelConvert.exe` as
-> `AGENTS.md` and describes the source tree. In an install, the source
-> `python/` folder is `scripts/`, there is no C++ source or `build.py`, and
-> the install folder is usually read-only and replaced on update. Add or
-> override things in the user folders instead, which need no rebuild and
-> survive updates:
->
-> | What | Where |
-> |---|---|
-> | conversions (`*.json`, `*.py`) | `%APPDATA%\PeelConvert\conversions\` |
-> | tool definitions / downloads | `%APPDATA%\PeelConvert\tools.json` |
-> | path to a tool you already have | `%APPDATA%\PeelConvert\settings.json` → `{"tools": {"<name>": "C:/path/tool.exe"}}` |
->
-> Then press **Reload** in the app. Recipe A (§4) and the `.py` part of §4.1 work
-> this way. Recipes B (§5, until its refactor has shipped) and C (§6), and any
-> C++ change, need the source repository.
+## Where your change goes
+
+| You want | Do this |
+|---|---|
+| An operation only for you | Put it in the user folder `%APPDATA%\PeelConvert\` (it survives updates and re-installs), press **Reload** in the app. |
+| An operation for everyone | Work in a clone of this repo, add the conversion and tests, open a pull request (see `CONTRIBUTING.md`). Every PR is reviewed by the maintainer. |
+| A C++ or binding change | Needs the app repository and a new installer; this repo cannot carry it. |
+
+User-folder locations:
+
+| What | Where |
+|---|---|
+| conversions (`*.json`, `*.py`) | `%APPDATA%\PeelConvert\conversions\` |
+| tool definitions / downloads | `%APPDATA%\PeelConvert\tools.json` |
+| path to a tool you already have | `%APPDATA%\PeelConvert\settings.json` → `{"tools": {"<name>": "C:/path/tool.exe"}}` |
+
+Never edit the installed `scripts/` folder: updates and re-installs replace it.
+Recipe A (§4) and the `.py` part of §4.1 work from the user folder. Recipes B
+(§5, until its refactor has shipped) and C (§6), and any C++ change, need the
+source repositories.
 
 ---
 
@@ -35,7 +41,7 @@ PeelConvert is a Qt/C++ app with an embedded Python. The split is strict:
 | Side | Owns | Knows nothing about |
 |---|---|---|
 | C++ (`src/`) | the window, the queue table, the `work::Pipeline`, the `work::StepExecutor` that runs it, the Op info window | conversions, tools, ffmpeg, output-path rules |
-| Python (`python/convert/`) | conversion definitions, tool lookup and download, output-path rules, the Op subclasses that do the work | widgets (it only calls the panel's public methods) |
+| Python (`convert/`) | conversion definitions, tool lookup and download, output-path rules, the Op subclasses that do the work | widgets (it only calls the panel's public methods) |
 
 The C++ panel emits signals ("files were added", "Start was clicked"); a Python
 `Controller` listens, creates Ops and adds them to the panel's Pipeline; the
@@ -44,7 +50,7 @@ the tool on a worker thread and reports progress, logs and its final state back
 through thread-safe Op methods; the table follows the Pipeline automatically.
 
 ```
- ConvertPanel (C++)                      Controller (python/convert/app.py)
+ ConvertPanel (C++)                      Controller (convert/app.py)
  ───────────────────                     ──────────────────────────────────
  filesAdded(paths, conversionId) ──────► add_files: one ConvertOp per file,
                                           pipeline.addOp(op)
@@ -55,7 +61,7 @@ through thread-safe Op methods; the table follows the Pipeline automatically.
  queueIdle() ──────────────────────────► queue_idle: revalidate, refresh notice
 
  work::StepExecutor ── op.start(inputs, upstream) ──► ConvertOp / InstallToolOp
-                                                      (python/convert/ops.py)
+                                                      (convert/ops.py)
  table / log / info window ◄── setProgress, setStatus, log, complete/fail/acknowledgeCancel
 ```
 
@@ -66,17 +72,17 @@ through thread-safe Op methods; the table follows the Pipeline automatically.
 2. `appPythonStart()` registers two built-in modules, **`PeelCore` first**, then
    `convertapp` (it uses PeelCore's types), starts Python, and calls
    `convert_startup.install()`.
-3. `python/convert_startup.py: install()` builds `convert.app.Controller(win.convertPanel())`
+3. `convert_startup.py: install()` builds `convert.app.Controller(win.convertPanel())`
    and keeps it in a module global so its signal connections live as long as the app.
 4. `PeelConvert --python-check` calls `convert_startup.check()`, which imports
    every PySide6 module, loads the conversions, and fails if any shipped
    definition is invalid. `build.py package` runs this check on the installed app.
 
-Where the `python/` folder comes from:
+Where this code is loaded from:
 
-- **Dev build** (`build.py run`): the source folder `python/` itself is on `sys.path`
+- **Dev build** (`build.py run`): the repository folder itself is on `sys.path`
   (`PEEL_APP_PYTHON_DIR`). Edit a `.py` file and restart the app: no rebuild needed.
-- **Staged / installed** (`build.py stage`, `run --staged`, the installer): `python/` is
+- **Staged / installed** (`build.py stage`, `run --staged`, the installer): this repository is
   copied to `<app>/scripts/`. Re-run `stage` after Python changes.
 - The **Reload** button re-reads conversion definitions (JSON and `.py` files in the
   conversion folders) but does **not** reload the `convert` package modules. Changes to
@@ -96,7 +102,7 @@ outside the app, which is why the tests use a fake PeelCore (§7).
 
 ## 2. The Python package, file by file
 
-All paths are under `python/`.
+All paths are relative to this repository's root.
 
 | File | Role | Imports PeelCore? |
 |---|---|---|
@@ -153,7 +159,7 @@ class Job:
 `{input}` and `{output}`.
 
 **Loading order** (`registry.load_all`): the shipped folder
-`python/convert/conversions/`, then the user folder
+`convert/conversions/`, then the user folder
 `%APPDATA%\PeelConvert\conversions\`. In each folder, every `*.py` is executed
 first (sorted by name), then every `*.json`. A later definition with the same
 `id` replaces an earlier one, so a user can override a shipped conversion.
@@ -368,7 +374,7 @@ Only when Python needs a new UI capability (a new widget, signal or method):
 
 Usually JSON only, no code.
 
-1. Pick the file: add to `python/convert/conversions/ffmpeg.json` to ship it, or
+1. Pick the file: add to `convert/conversions/ffmpeg.json` to ship it, or
    create a new `*.json` in that folder for a separate group. (Users put theirs in
    `%APPDATA%\PeelConvert\conversions\`.)
 2. Add an entry:
@@ -396,7 +402,7 @@ Usually JSON only, no code.
    BtbN **LGPL** build, which has **no libx264/libx265** (and no other GPL
    libraries). A conversion relying on them works only with a user-supplied ffmpeg.
    Prefer LGPL-available encoders, or document the requirement in the label.
-4. Validate: from `python/`, `python -m convert.check` (lists every conversion,
+4. Validate: from the repository root, `python -m convert.check` (lists every conversion,
    exit 1 on any problem).
 5. Run the tests (§7); `test_shipped_definitions_are_valid` covers shipped JSON.
 6. Try it in the app: Reload, add a file, Start. Double-click the row to see the
@@ -408,7 +414,7 @@ Use a Python class when the arguments depend on the input (probing, choosing a
 filter by extension, multiple inputs derived from the source, etc.):
 
 ```python
-# python/convert/conversions/thumbnails.py
+# convert/conversions/thumbnails.py
 import os
 from convert import Conversion
 
@@ -447,7 +453,7 @@ definitions will work.
 
 ### 5.1 What is ffmpeg-specific today
 
-| Where (`python/convert/ops.py`) | ffmpeg assumption |
+| Where (`convert/ops.py`) | ffmpeg assumption |
 |---|---|
 | `ConvertOp._execute`: argv prefix | `-nostdin -hide_banner -nostats -progress pipe:1 -y` |
 | `ConvertOp._execute`: stdout loop → `_progress` | stdout is `key=value` progress; other lines are dropped, not logged |
@@ -491,7 +497,7 @@ unchanged:
 
 ### 5.3 Then, for each new tool
 
-1. **Make it findable.** Add an entry to `python/convert/tools.json` with `exe`
+1. **Make it findable.** Add an entry to `convert/tools.json` with `exe`
    and, if it can be downloaded, a per-platform `download` with `url`, a
    `sha256` or `sha256_url`, and the `path` glob of the exe inside the zip.
    Record licence and source in `note`. Pin a versioned URL with a fixed
@@ -501,7 +507,7 @@ unchanged:
    checksum-before-unpack and safe-path rules), or ship no download and let the
    user set the path in settings.json.
 2. **Write the conversions** with `"tool": "<name>"`, in a new
-   `python/convert/conversions/<name>.json` (one file per tool keeps things tidy).
+   `convert/conversions/<name>.json` (one file per tool keeps things tidy).
    `command` holds the tool's own arguments with `{input}` and `{output}`.
    The tool must:
    - read the input path and write exactly the path in `{output}` (the temp
@@ -536,7 +542,7 @@ Example (after the refactor):
 
 For work that is not "one input file → one output file with a tool" (e.g. merging
 several files, probing media info, cleaning the tools folder), write a new
-`work.Op` subclass in `python/convert/ops.py`, following `InstallToolOp`:
+`work.Op` subclass in `convert/ops.py`, following `InstallToolOp`:
 
 ```python
 NEW_TYPE = "convert.something"
@@ -599,7 +605,7 @@ Rules for every Op:
 
 ## 7. Testing
 
-From `python/`:
+From the repository root:
 
 ```
 python -m unittest discover -s tests -v     # unit tests: no build, no real ffmpeg
@@ -629,7 +635,7 @@ python build.py stage && python build.py run --staged -- --python-check   # what
 
 ## 8. Checklist before you finish
 
-- [ ] `python -m unittest discover -s tests -v` passes (from `python/`).
+- [ ] `python -m unittest discover -s tests -v` passes (from the repository root).
 - [ ] `python -m convert.check` prints no `PROBLEM:` lines.
 - [ ] New shipped tool downloads have a checksum and a `note` with the licence.
 - [ ] Codecs/features used exist in the build the app downloads (LGPL ffmpeg: no x264/x265).
