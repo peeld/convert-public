@@ -20,6 +20,8 @@ jobs:
       - run: python -m unittest discover -s tests
       - run: python tools/validate.py
         env: { PYTHONPATH: tests/fakecore }
+      - name: files.json (the bundled copy's file list) is current
+        run: python tools/build_release.py --check
       - run: python tools/build_release.py dist
       - name: Create draft release with zip and file list
         env: { GH_TOKEN: "${{ github.token }}" }

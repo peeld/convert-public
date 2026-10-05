@@ -16,6 +16,7 @@ from PySide6.QtCore import qVersion
 from PySide6.QtWidgets import QMainWindow, QMessageBox
 
 _controller = None      # keeps the signal connections alive
+_updates = None         # the update service (convert/update_service.py)
 
 
 def main_window():
@@ -31,6 +32,9 @@ def install():
     menu = win.menuBar().addMenu("&Python")
     menu.addAction("About Python...").triggered.connect(
         lambda: QMessageBox.information(win, "Python", report()))
+    global _updates
+    from convert.update_ui import install_update_service
+    _updates = install_update_service(win, _controller)
 
 
 def loaded_dlls():

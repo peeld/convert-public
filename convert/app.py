@@ -73,6 +73,10 @@ class Controller:
             lines.append("Skipped a conversion definition: %s%s" % (registry.problems[0], extra))
         self.panel.setNotice("\n".join(lines), install_button)
 
+    def is_busy(self):
+        """True while any op is running (an update must not restart the app then)."""
+        return any(op.state() == work.OpState.Running for op in self.pipeline.ops())
+
     def convert_ops(self):
         return [op for op in self.pipeline.ops() if isinstance(op, ConvertOp)]
 

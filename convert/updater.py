@@ -203,3 +203,105 @@ def drop_stale(bundled_version, state):
         state.data.update(current=None, previous=None, pending=False, booted=False)
         state.save()
         prune(state)
+
+
+# ---- settings (settings.json, key "python") ------------------------------------------
+class Settings:
+    """The updater's part of the user's settings.json:
+        {"python": {"auto_update": true|false, "last_check": "2026-10-05T12:00:00+00:00",
+                    "developer_folder": "C:/..."}}
+    auto_update is absent until the user has been asked.  Other keys in the file are kept."""
+
+    def __init__(self, path):
+        self.path = Path(path)
+
+    def _read(self):
+        try:
+            data = json.loads(self.path.read_text("utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def get(self, key, default=None):
+        py = self._read().get("python")
+        return py.get(key, default) if isinstance(py, dict) else default
+
+    def set(self, key, value):
+        data = self._read()
+        if not isinstance(data.get("python"), dict):
+            data["python"] = {}
+        data["python"][key] = value
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, indent=2), "utf-8")
+        tmp.replace(self.path)
+
+
+def check_due(last_check, now, hours=24):
+    """True if the last check (ISO text, or None) was more than `hours` ago, or never / unreadable."""
+    from datetime import datetime, timedelta
+    try:
+        then = datetime.fromisoformat(last_check)
+    except (TypeError, ValueError):
+        return True
+    if then.tzinfo is None or now.tzinfo is None:
+        return True
+    return now - then >= timedelta(hours=hours) or then > now + timedelta(hours=1)
+
+
+# ---- bundled files edited by hand ----------------------------------------------------
+LISTING = "files.json"      # the release's file list, also kept in the repo root (tools/build_release.py --listing)
+
+
+def modified_files(folder):
+    """Files in `folder` (the bundled copy) that differ from its own files.json: edited, missing or
+    added.  Empty if there is no files.json to compare with (nothing to say)."""
+    folder = Path(folder)
+    try:
+        wanted = json.loads((folder / LISTING).read_text("utf-8"))["files"]
+    except (OSError, ValueError, KeyError):
+        return []
+    changed = []
+    for name, sha in wanted.items():
+        f = folder / name
+        try:
+            data = f.read_bytes()
+        except OSError:
+            changed.append(name + " (missing)")
+            continue
+        if f.suffix in (".py", ".json", ".md"):
+            data = data.replace(b"\r\n", b"\n")
+        if hashlib.sha256(data).hexdigest() != sha:
+            changed.append(name)
+    for f in sorted(folder.rglob("*")):
+        rel = f.relative_to(folder).as_posix()
+        top = rel.split("/")[0]
+        if (f.is_file() and top in ("convert",) and rel not in wanted and "__pycache__" not in f.parts
+                and f.suffix != ".pyc"):
+            changed.append(rel + " (added)")
+    return changed
+
+
+# ---- the network (small, so the logic above can be tested without it) ----------------
+ALLOWED_PREFIXES = ("https://api.github.com/repos/peeld/convert-public/",
+                    "https://github.com/peeld/convert-public/releases/download/")
+MAX_BYTES = 50 * 1024 * 1024
+
+
+def https_get(url, timeout=20):
+    """GET `url` (only the project's own GitHub release URLs, over https) and return the bytes."""
+    import urllib.request
+    # asset URLs may redirect to GitHub's CDN; only the URL we start from is checked, and the
+    # signature on the file list is what decides whether the content is trusted.
+    if not url.startswith(ALLOWED_PREFIXES):
+        raise UpdateError("refusing to fetch " + url)
+    req = urllib.request.Request(url, headers={"User-Agent": "PeelConvert-updater", "Accept": "application/vnd.github+json, */*"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        data = resp.read(MAX_BYTES + 1)
+    if len(data) > MAX_BYTES:
+        raise UpdateError("download too large")
+    return data
+
+
+def fetch_json(url):
+    return json.loads(https_get(url).decode("utf-8"))
