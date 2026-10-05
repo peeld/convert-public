@@ -15,7 +15,7 @@ import os
 from PeelCore import work
 
 from . import paths, tools
-from .conversion import registry, user_dir
+from .conversion import migrate_user_conversions, registry, user_dir
 from .ops import ConvertOp, InstallToolOp, CONVERT_TYPE
 
 

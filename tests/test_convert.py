@@ -212,6 +212,63 @@ class LoadingTests(unittest.TestCase):
         self.assertEqual(r.get("a").label, "Second")
 
 
+class UserPythonTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.old_appdata = os.environ.get("APPDATA")
+        os.environ["APPDATA"] = self.tmp.name
+        self.root = Path(self.tmp.name) / "PeelConvert"
+
+    def tearDown(self):
+        if self.old_appdata is None:
+            os.environ.pop("APPDATA", None)
+        else:
+            os.environ["APPDATA"] = self.old_appdata
+        self.tmp.cleanup()
+
+    def test_user_conversions_live_inside_userpython(self):
+        from convert.conversion import user_dir, user_python_dir
+        self.assertEqual(user_python_dir(), self.root / "userPython")
+        self.assertEqual(user_dir(), self.root / "userPython" / "conversions")
+
+    def test_old_folder_is_migrated_without_overwriting(self):
+        from convert.conversion import migrate_user_conversions, user_dir
+        old = self.root / "conversions"
+        old.mkdir(parents=True)
+        (old / "a.json").write_text("A")
+        (old / "b.json").write_text("B")
+        user_dir().mkdir(parents=True)
+        (user_dir() / "b.json").write_text("NEW B")
+        moved, left = migrate_user_conversions()
+        self.assertEqual((moved, left), (["a.json"], ["b.json"]))
+        self.assertEqual((user_dir() / "a.json").read_text(), "A")
+        self.assertEqual((user_dir() / "b.json").read_text(), "NEW B")
+        self.assertTrue((old / "b.json").exists())      # left for the user to sort out
+        self.assertEqual(migrate_user_conversions(), ([], ["b.json"]))
+
+    def test_nothing_to_migrate(self):
+        from convert.conversion import migrate_user_conversions
+        self.assertEqual(migrate_user_conversions(), ([], []))
+
+    def test_user_conversion_overrides_a_shipped_one_and_is_marked(self):
+        from convert.conversion import shipped_dir
+        shipped_id = ConversionRegistry()
+        shipped_id.load_dir(shipped_dir())
+        some = shipped_id.all()[0].id
+        user = Path(self.tmp.name) / "u"
+        user.mkdir()
+        (user / "x.json").write_text(json.dumps({"id": some, "label": "Mine", "group": "G", "output_ext": "x",
+                                                 "command": ["{input}", "{output}"]}))
+        (user / "y.json").write_text(json.dumps({"id": "brand.new", "label": "New", "group": "G", "output_ext": "x",
+                                                 "command": ["{input}", "{output}"]}))
+        r = ConversionRegistry()
+        r.load_all([user])
+        self.assertEqual(r.get(some).label, "Mine")
+        self.assertEqual(r.overrides, {some})
+        r.load_all([])
+        self.assertEqual(r.overrides, set())
+
+
 FAKE_FFMPEG = r'''#!{python}
 import sys, time
 args = sys.argv[1:]

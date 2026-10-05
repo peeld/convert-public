@@ -109,6 +109,7 @@ class ConversionRegistry:
     def __init__(self):
         self._items = {}
         self.problems = []      # text lines for the user, newest last
+        self.overrides = set()  # ids a later folder (the user's) replaced
 
     # ---- registering -------------------------------------------------------
     def register(self, conversion, source=""):
@@ -131,6 +132,7 @@ class ConversionRegistry:
     def clear(self):
         self._items.clear()
         self.problems = []
+        self.overrides = set()
 
     # ---- loading -----------------------------------------------------------
     def load_dir(self, folder):
@@ -148,8 +150,11 @@ class ConversionRegistry:
     def load_all(self, extra_dirs=()):
         """Shipped definitions, then the user's: later ones replace earlier ones."""
         self.clear()
-        for folder in (shipped_dir(), *extra_dirs):
+        self.load_dir(shipped_dir())
+        shipped = dict(self._items)
+        for folder in extra_dirs:
             self.load_dir(folder)
+        self.overrides = {i for i, c in shipped.items() if self._items.get(i) is not c}
 
     def _load_py(self, path):
         name = "convert_user_" + path.stem
@@ -241,5 +246,34 @@ def user_data_dir():
     return Path(base) / "PeelConvert"
 
 
+def user_python_dir():
+    """The user's own operations.  No update or installer ever writes here."""
+    return user_data_dir() / "userPython"
+
+
 def user_dir():
-    return user_data_dir() / "conversions"
+    """Where the user's conversion files (*.json, *.py) live."""
+    return user_python_dir() / "conversions"
+
+
+def migrate_user_conversions():
+    """Move files from the old %APPDATA%/PeelConvert/conversions into userPython/conversions.
+    Never overwrites; a file that already exists in the new place stays behind (and is reported).
+    Returns (moved, left_behind) lists of file names."""
+    old, new = user_data_dir() / "conversions", user_dir()
+    moved, left = [], []
+    if not old.is_dir():
+        return moved, left
+    new.mkdir(parents=True, exist_ok=True)
+    for src in sorted(old.iterdir()):
+        dst = new / src.name
+        if dst.exists():
+            left.append(src.name)
+            continue
+        src.replace(dst)
+        moved.append(src.name)
+    try:
+        old.rmdir()
+    except OSError:
+        pass
+    return moved, left

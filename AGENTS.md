@@ -23,7 +23,7 @@ User-folder locations:
 
 | What | Where |
 |---|---|
-| conversions (`*.json`, `*.py`) | `%APPDATA%\PeelConvert\conversions\` |
+| conversions (`*.json`, `*.py`) | `%APPDATA%\PeelConvert\userPython\conversions\` |
 | tool definitions / downloads | `%APPDATA%\PeelConvert\tools.json` |
 | path to a tool you already have | `%APPDATA%\PeelConvert\settings.json` → `{"tools": {"<name>": "C:/path/tool.exe"}}` |
 
@@ -160,7 +160,7 @@ class Job:
 
 **Loading order** (`registry.load_all`): the shipped folder
 `convert/conversions/`, then the user folder
-`%APPDATA%\PeelConvert\conversions\`. In each folder, every `*.py` is executed
+`%APPDATA%\PeelConvert\userPython\conversions\`. In each folder, every `*.py` is executed
 first (sorted by name), then every `*.json`. A later definition with the same
 `id` replaces an earlier one, so a user can override a shipped conversion.
 
@@ -376,7 +376,7 @@ Usually JSON only, no code.
 
 1. Pick the file: add to `convert/conversions/ffmpeg.json` to ship it, or
    create a new `*.json` in that folder for a separate group. (Users put theirs in
-   `%APPDATA%\PeelConvert\conversions\`.)
+   `%APPDATA%\PeelConvert\userPython\conversions\`.)
 2. Add an entry:
    ```json
    {

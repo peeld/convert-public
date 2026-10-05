@@ -13,6 +13,7 @@ package knows about conversions and tools:
 
 Only `conversion` and `paths` are imported here, so they work without PeelCore.
 """
-from .conversion import Conversion, Job, register, registry, user_dir
+from .conversion import Conversion, Job, migrate_user_conversions, register, registry, user_dir, user_python_dir
 
-__all__ = ["Conversion", "Job", "register", "registry", "user_dir"]
+__all__ = ["Conversion", "Job", "register", "registry", "user_dir",
+           "user_python_dir", "migrate_user_conversions"]
