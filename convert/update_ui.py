@@ -4,8 +4,9 @@ import threading
 
 from PySide6.QtCore import QObject, QProcess, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QApplication, QMenu, QMessageBox
+from PySide6.QtWidgets import QApplication, QFileDialog, QMenu, QMessageBox
 
+from . import devfolder
 from .conversion import user_python_dir
 
 
@@ -119,6 +120,63 @@ class QtUpdateUi:
         QTimer.singleShot(0, QApplication.quit)
 
 
+def developer_folder_dialog(window, settings, restart):
+    """Help > Developer folder...: point the app at a clone of convert-public, clone one, or turn it off."""
+    folder = devfolder.current(settings)
+    box = QMessageBox(window)
+    box.setWindowTitle("Developer folder")
+    box.setText("Developer folder: %s" % (folder or "off"))
+    box.setInformativeText("When set, PeelConvert loads its Python code (conversions, ops) from a clone of the "
+                           "convert-public repository instead of its own copy, so you or your coding agent can "
+                           "change an operation and try it on real files. Python changes take effect after a "
+                           "restart; conversion files are re-read by Reload. Updates are paused while it is on.")
+    choose = box.addButton("Choose a clone...", QMessageBox.ActionRole)
+    clone = box.addButton("Clone it for me...", QMessageBox.ActionRole)
+    clone.setEnabled(devfolder.git_available())
+    clone.setToolTip("" if clone.isEnabled() else "git was not found on this computer")
+    off = box.addButton("Turn off", QMessageBox.DestructiveRole)
+    off.setEnabled(bool(folder))
+    box.addButton("Close", QMessageBox.RejectRole)
+    box.exec()
+    picked = box.clickedButton()
+    target = None
+    if picked is choose:
+        target = QFileDialog.getExistingDirectory(window, "Folder containing convert/ and manifest.json", folder)
+    elif picked is clone:
+        parent = QFileDialog.getExistingDirectory(window, "Where to put the convert-public folder")
+        if parent:
+            from pathlib import Path
+            target = str(Path(parent) / "convert-public")
+            error = devfolder.clone(target)
+            if error:
+                QMessageBox.warning(window, "Developer folder", "Could not clone:\n\n" + error)
+                return
+    elif picked is off:
+        devfolder.set_folder(settings, "")
+        restart_prompt(window, "The developer folder is off.", restart)
+        return
+    if not target:
+        return
+    try:
+        devfolder.set_folder(settings, target)
+    except ValueError as exc:
+        QMessageBox.warning(window, "Developer folder", str(exc))
+        return
+    restart_prompt(window, "Using %s" % target, restart)
+
+
+def restart_prompt(window, text, restart):
+    box = QMessageBox(window)
+    box.setWindowTitle("Developer folder")
+    box.setText(text)
+    box.setInformativeText("Restart PeelConvert to apply it.")
+    now = box.addButton("Restart now", QMessageBox.AcceptRole)
+    box.addButton("Later", QMessageBox.RejectRole)
+    box.exec()
+    if box.clickedButton() is now:
+        restart()
+
+
 def install_update_service(window, controller):
     """Called from convert_startup.install(). Never raises: updates are optional."""
     try:
@@ -150,6 +208,8 @@ def install_update_service(window, controller):
             auto.setCheckable(True)
             auto.setChecked(bool(service.settings.get("auto_update")))
             auto.toggled.connect(service.set_auto)
+            help_menu.addAction("Developer folder...").triggered.connect(
+                lambda: developer_folder_dialog(window, service.settings, ui.restart))
         QTimer.singleShot(2000, service.startup)       # after the window is up
         return service
     except Exception as exc:  # noqa: BLE001
