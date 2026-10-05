@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.vs/
+.idea/
+.vscode/
+
+# Never commit secrets or signing keys
+credentials.json
+licenseConfig.h
+*.key
+*.pem

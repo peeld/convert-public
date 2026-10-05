@@ -1,0 +1,282 @@
+[
+  {
+    "id": "video.to-mp4",
+    "label": "Video to MP4 (H.264 + AAC)",
+    "group": "Video",
+    "inputs": [
+      "mov",
+      "mkv",
+      "avi",
+      "webm",
+      "mp4",
+      "m4v",
+      "wmv",
+      "flv",
+      "mpg",
+      "mpeg",
+      "ts",
+      "mts",
+      "m2ts",
+      "3gp",
+      "ogv"
+    ],
+    "output_ext": "mp4",
+    "command": [
+      "-i",
+      "{input}",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "medium",
+      "-crf",
+      "23",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "160k",
+      "-movflags",
+      "+faststart",
+      "{output}"
+    ],
+    "tool": "ffmpeg"
+  },
+  {
+    "id": "video.to-webm",
+    "label": "Video to WebM (VP9 + Opus)",
+    "group": "Video",
+    "inputs": [
+      "mov",
+      "mkv",
+      "avi",
+      "webm",
+      "mp4",
+      "m4v",
+      "wmv",
+      "flv",
+      "mpg",
+      "mpeg",
+      "ts",
+      "mts",
+      "m2ts",
+      "3gp",
+      "ogv"
+    ],
+    "output_ext": "webm",
+    "command": [
+      "-i",
+      "{input}",
+      "-c:v",
+      "libvpx-vp9",
+      "-crf",
+      "32",
+      "-b:v",
+      "0",
+      "-c:a",
+      "libopus",
+      "{output}"
+    ],
+    "tool": "ffmpeg"
+  },
+  {
+    "id": "video.to-gif",
+    "label": "Video to GIF (15 fps, 480 wide)",
+    "group": "Video",
+    "inputs": [
+      "mov",
+      "mkv",
+      "avi",
+      "webm",
+      "mp4",
+      "m4v",
+      "wmv",
+      "flv",
+      "mpg",
+      "mpeg",
+      "ts",
+      "mts",
+      "m2ts",
+      "3gp",
+      "ogv"
+    ],
+    "output_ext": "gif",
+    "command": [
+      "-i",
+      "{input}",
+      "-vf",
+      "fps=15,scale=480:-1:flags=lanczos",
+      "-an",
+      "{output}"
+    ],
+    "tool": "ffmpeg"
+  },
+  {
+    "id": "video.extract-mp3",
+    "label": "Extract audio to MP3",
+    "group": "Audio",
+    "inputs": [
+      "mov",
+      "mkv",
+      "avi",
+      "webm",
+      "mp4",
+      "m4v",
+      "wmv",
+      "flv",
+      "mpg",
+      "mpeg",
+      "ts",
+      "mts",
+      "m2ts",
+      "3gp",
+      "ogv"
+    ],
+    "output_ext": "mp3",
+    "command": [
+      "-i",
+      "{input}",
+      "-vn",
+      "-c:a",
+      "libmp3lame",
+      "-q:a",
+      "2",
+      "{output}"
+    ],
+    "tool": "ffmpeg"
+  },
+  {
+    "id": "audio.to-mp3",
+    "label": "Audio to MP3",
+    "group": "Audio",
+    "inputs": [
+      "wav",
+      "flac",
+      "mp3",
+      "m4a",
+      "aac",
+      "ogg",
+      "oga",
+      "opus",
+      "wma",
+      "aiff",
+      "aif"
+    ],
+    "output_ext": "mp3",
+    "command": [
+      "-i",
+      "{input}",
+      "-vn",
+      "-c:a",
+      "libmp3lame",
+      "-q:a",
+      "2",
+      "{output}"
+    ],
+    "tool": "ffmpeg"
+  },
+  {
+    "id": "audio.to-flac",
+    "label": "Audio to FLAC",
+    "group": "Audio",
+    "inputs": [
+      "wav",
+      "flac",
+      "mp3",
+      "m4a",
+      "aac",
+      "ogg",
+      "oga",
+      "opus",
+      "wma",
+      "aiff",
+      "aif"
+    ],
+    "output_ext": "flac",
+    "command": [
+      "-i",
+      "{input}",
+      "-vn",
+      "-c:a",
+      "flac",
+      "{output}"
+    ],
+    "tool": "ffmpeg"
+  },
+  {
+    "id": "audio.to-wav",
+    "label": "Audio to WAV",
+    "group": "Audio",
+    "inputs": [
+      "wav",
+      "flac",
+      "mp3",
+      "m4a",
+      "aac",
+      "ogg",
+      "oga",
+      "opus",
+      "wma",
+      "aiff",
+      "aif"
+    ],
+    "output_ext": "wav",
+    "command": [
+      "-i",
+      "{input}",
+      "-vn",
+      "-c:a",
+      "pcm_s16le",
+      "{output}"
+    ],
+    "tool": "ffmpeg"
+  },
+  {
+    "id": "image.to-png",
+    "label": "Image to PNG",
+    "group": "Image",
+    "inputs": [
+      "png",
+      "jpg",
+      "jpeg",
+      "bmp",
+      "tif",
+      "tiff",
+      "webp",
+      "gif"
+    ],
+    "output_ext": "png",
+    "command": [
+      "-i",
+      "{input}",
+      "-frames:v",
+      "1",
+      "{output}"
+    ],
+    "tool": "ffmpeg"
+  },
+  {
+    "id": "image.to-jpg",
+    "label": "Image to JPG",
+    "group": "Image",
+    "inputs": [
+      "png",
+      "jpg",
+      "jpeg",
+      "bmp",
+      "tif",
+      "tiff",
+      "webp",
+      "gif"
+    ],
+    "output_ext": "jpg",
+    "command": [
+      "-i",
+      "{input}",
+      "-frames:v",
+      "1",
+      "-q:v",
+      "2",
+      "{output}"
+    ],
+    "tool": "ffmpeg"
+  }
+]

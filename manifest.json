@@ -1,0 +1,7 @@
+{
+  "schema": 1,
+  "name": "convert",
+  "version": "0.1.0",
+  "host_api": { "min": 1, "max": 1 },
+  "notes": "Pure Python, JSON and data files only. Anything needing a C++ or binding change ships as a new installer."
+}

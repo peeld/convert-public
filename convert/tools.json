@@ -1,0 +1,15 @@
+{
+  "tools": {
+    "ffmpeg": {
+      "exe": "ffmpeg",
+      "download": {
+        "windows-x86_64": {
+          "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-lgpl.zip",
+          "sha256_url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/checksums.sha256",
+          "path": "*/bin/ffmpeg.exe",
+          "note": "BtbN LGPL build (no libx264/libx265). 'latest' is a rolling tag, so the hash is read from the release's own checksums.sha256 at install time."
+        }
+      }
+    }
+  }
+}
