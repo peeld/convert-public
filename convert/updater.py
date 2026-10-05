@@ -16,13 +16,14 @@ Layout under the update root (%APPDATA%/PeelConvert/python):
 State (state.json):
     {"current": "0.2.0",   version to load, or null for the bundled copy
      "previous": "0.1.5",  version to fall back to (kept for one release), or null
-     "pending": true,      current has been installed but has not yet started cleanly
+     "pending": true,      current has been installed but has not yet reached "good"
+     "booted": false,      pending, and the app has already started once with it
      "bad": ["0.1.9"]}     versions that failed; never offered again
 
-Startup protocol (the C++ loader follows it): if `pending` and the previous start also
-began with pending set, the version failed -> add it to `bad`, current = previous,
-pending = false.  Otherwise load `current`.  After the window is up and the Python check
-passes, call mark_good().  The loader never installs; only install() does.
+Startup protocol (src/pythonSource.cpp does the same in C++): if `pending` and `booted`, the
+previous start never reached good -> add `current` to `bad`, current = previous, pending and
+booted = false.  If `pending` and not `booted`, set `booted` and load `current`.  Once Python
+has started cleanly, mark_good() clears both.  The loader never installs; only install() does.
 """
 import hashlib
 import io
@@ -57,7 +58,7 @@ class State:
     def __init__(self, root):
         self.root = Path(root)
         self.path = self.root / "state.json"
-        self.data = {"current": None, "previous": None, "pending": False, "bad": []}
+        self.data = {"current": None, "previous": None, "pending": False, "booted": False, "bad": []}
         try:
             loaded = json.loads(self.path.read_text("utf-8"))
             if isinstance(loaded, dict):
@@ -81,20 +82,23 @@ class State:
         return version in self.data["bad"]
 
 
-def boot(state, started_pending_before):
-    """What the loader does at startup.  Returns the version to load (None = bundled).
-    `started_pending_before` is True when the previous run set pending but never marked good."""
+def boot(state):
+    """What the loader does at startup.  Returns the version to load (None = bundled)."""
     d = state.data
-    if d["pending"] and started_pending_before:
+    if d["pending"] and d["booted"]:
         if d["current"] and d["current"] not in d["bad"]:
             d["bad"].append(d["current"])
-        d["current"], d["previous"], d["pending"] = d["previous"], None, False
+        d["current"], d["previous"], d["pending"], d["booted"] = d["previous"], None, False, False
+        state.save()
+    elif d["pending"]:
+        d["booted"] = True
         state.save()
     return d["current"]
 
 
 def mark_good(state):
     state.data["pending"] = False
+    state.data["booted"] = False
     state.save()
 
 
@@ -176,7 +180,7 @@ def install(update, running_version, host_api, state, download, verify, run_chec
                 shutil.rmtree(staging, ignore_errors=True)
 
     d = state.data
-    d["previous"], d["current"], d["pending"] = d["current"], version, True
+    d["previous"], d["current"], d["pending"], d["booted"] = d["current"], version, True, False
     state.save()
     prune(state)
     return version
@@ -196,6 +200,6 @@ def drop_stale(bundled_version, state):
     """After the app itself was upgraded: if bundled is newer than what was downloaded, forget the downloads."""
     cur = state.data["current"]
     if cur and parse_version(cur) <= parse_version(bundled_version):
-        state.data.update(current=None, previous=None, pending=False)
+        state.data.update(current=None, previous=None, pending=False, booted=False)
         state.save()
         prune(state)

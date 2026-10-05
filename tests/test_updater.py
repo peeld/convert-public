@@ -100,15 +100,23 @@ class UpdaterTests(unittest.TestCase):
             self.install(upd, blobs, running="0.1.0")
             u.mark_good(self.state) if v == "0.2.0" else None
         self.assertEqual(self.state["previous"], "0.2.0")
-        # first start of 0.3.0 does not mark good; the next start sees pending twice
-        self.assertEqual(u.boot(self.state, started_pending_before=False), "0.3.0")
-        self.assertEqual(u.boot(self.state, started_pending_before=True), "0.2.0")
+        # first start of 0.3.0 does not reach good; the next start rolls back
+        self.assertEqual(u.boot(self.state), "0.3.0")
+        self.assertEqual(u.boot(self.state), "0.2.0")
         self.assertTrue(self.state.is_bad("0.3.0"))
         self.assertFalse(self.state["pending"])
         # and 0.3.0 is not offered again
         rel = {"tag_name": "v0.3.0", "assets": [{"name": n, "browser_download_url": "u"}
                                                    for n in ("convert-0.3.0.zip", "files.json", "files.json.sig")]}
         self.assertIsNone(u.find_update(lambda url: rel, "0.2.0", 1, self.state))
+
+    def test_a_good_start_clears_pending(self):
+        upd, blobs = release("0.2.0")
+        self.install(upd, blobs)
+        self.assertEqual(u.boot(self.state), "0.2.0")
+        u.mark_good(self.state)
+        self.assertEqual(u.boot(self.state), "0.2.0")
+        self.assertEqual((self.state["pending"], self.state["booted"], self.state["bad"]), (False, False, []))
 
     def test_old_versions_are_pruned(self):
         for v in ("0.2.0", "0.3.0", "0.4.0"):
