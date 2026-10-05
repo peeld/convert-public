@@ -14,7 +14,7 @@
     "convert/tools.py": "45cde890f7631675bf74b32f0a492ddb25c825d1c32e233ab119db06a685fb52",
     "convert/update_service.py": "d6c60bb093255a6e7d5a74c3180c6f8f86013666c916a666d2b39d2ce23c7533",
     "convert/update_ui.py": "dba8b34fbc893b9b9231f0439e93d4cdce500c543bf944566671629b09c65883",
-    "convert/updater.py": "06fdbc186b20d32885b6cecb432a3320f60145c5cb0b023c3f57998ebfc4d9a6",
+    "convert/updater.py": "a00b26478d6c0e490c08563d1746e00908bb47c4c7eb255a642b770cad34e894",
     "convert_startup.py": "082ea692c28dfda47dedef2ef7bd1fde1c0f835d0836e449f126b37a64f19ab5",
     "manifest.json": "c85aa3995fe23157b6f6877644f703681c27350e9e643fdc37c9d2fe1cf9054a"
   },
