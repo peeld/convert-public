@@ -85,18 +85,37 @@ def _exe_names(name, entry):
     return [exe + ".exe", exe] if sys.platform == "win32" else [exe]
 
 
+BUILTIN = "builtin"      # a conversion whose "tool" is code inside the app: nothing to find or install
+
+
+def owner(name):
+    """The tool whose download provides `name`: tools.json "bundled_with" (ffprobe is
+    in ffmpeg's zip), else `name` itself."""
+    return manifest().get(name, {}).get("bundled_with") or name
+
+
 def find(name):
-    """Full path to the tool, or None."""
+    """Full path to the tool, or None.  BUILTIN is reported as the interpreter."""
+    if name == BUILTIN:
+        return sys.executable or BUILTIN
     path = configured_path(name)
     if path:
         return path
     entry = manifest().get(name, {})
-    root = tools_dir() / name
+    parent = owner(name)
+    root = tools_dir() / parent
     if root.is_dir():
         for exe in _exe_names(name, entry):
             for hit in sorted(root.rglob(exe)):
                 if hit.is_file():
                     return str(hit)
+    if parent != name:                      # next to the parent tool, wherever that was found
+        beside = find(parent)
+        if beside:
+            for exe in _exe_names(name, entry):
+                sibling = Path(beside).with_name(exe)
+                if sibling.is_file():
+                    return str(sibling)
     for exe in _exe_names(name, entry):
         hit = shutil.which(exe)
         if hit:
@@ -106,6 +125,7 @@ def find(name):
 
 def install_problems(name):
     """Why `name` cannot be downloaded, or []."""
+    name = owner(name)
     entry = manifest().get(name)
     if entry is None:
         return ["no tool called %s in tools.json" % name]
@@ -186,7 +206,9 @@ def _safe_members(archive, target):
 
 
 def install(name, progress=None, cancel=None):
-    """Download, check and unpack `name` into the tools folder.  Returns the exe path."""
+    """Download, check and unpack `name` (or the tool it is bundled with) into the tools
+    folder.  Returns the exe path."""
+    name = owner(name)
     problems = install_problems(name)
     if problems:
         raise ToolError(problems[0])

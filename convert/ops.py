@@ -20,7 +20,7 @@ import threading
 from PeelCore import work
 
 from . import paths, runner, tools
-from .conversion import Job, registry
+from .conversion import ConversionError, Job, registry
 
 CONVERT_TYPE = "convert.job"
 INSTALL_TYPE = "tool.install"
@@ -58,6 +58,9 @@ class ConvertOp(work.Op):
             problems.append("'%s' does not accept %s files" % (conversion.label, ext))
         if tools.find(conversion.tool) is None:
             problems.append("%s is not installed" % conversion.tool)
+        reason = conversion.unavailable()
+        if reason:
+            problems.append(reason)
         problems += paths.check_output(source, _prop(self, "output"))
         conflict = _prop(self, "conflict")
         if conflict:
@@ -94,10 +97,20 @@ class ConvertOp(work.Op):
                 self.acknowledgeCancel()
                 return
             try:
-                code, tail = self._execute(conversion, job)
+                if conversion.runs_itself:
+                    code, tail = self._execute_own(conversion, job)
+                else:
+                    code, tail = self._execute(conversion, job)
             finally:
                 runner.release()
-            self._finish(code, tail, job, output)
+            self._finish(code, tail, job, output, conversion)
+        except ConversionError as exc:  # a runs_itself conversion said why it failed
+            _remove(job.output)
+            if self._cancel.is_set():
+                self.acknowledgeCancel()
+            else:
+                self.log(work.LogStream.Stderr, str(exc))
+                self.fail(str(exc))
         except Exception as exc:        # never leave the Op RUNNING
             _remove(job.output)
             if self._cancel.is_set():
@@ -132,6 +145,25 @@ class ConvertOp(work.Op):
             self._proc = None
         return code, list(tail)
 
+    def _execute_own(self, conversion, job):
+        """A conversion that does its own work (conversion.runs_itself)."""
+        os.makedirs(os.path.dirname(job.output), exist_ok=True)
+        self.log(work.LogStream.Stdout, "run: %s %s" % (job.tool_path, os.path.basename(job.input)))
+        self.setStatus("Working")
+
+        def track(proc):
+            with self._proc_lock:
+                self._proc = proc
+            if self._cancel.is_set():
+                proc.terminate()
+
+        try:
+            conversion.run(job, self._cancel, track)
+        finally:
+            with self._proc_lock:
+                self._proc = None
+        return 0, []
+
     def _read_stderr(self, proc, state, tail):
         for raw in proc.stderr:
             line = raw.decode("utf-8", "replace").rstrip()
@@ -162,7 +194,7 @@ class ConvertOp(work.Op):
                 state["last"] = percent
                 self.log(work.LogStream.Stdout, "progress %d%%" % percent)
 
-    def _finish(self, code, tail, job, output):
+    def _finish(self, code, tail, job, output, conversion):
         if self._cancel.is_set():
             _remove(job.output)
             self.log(work.LogStream.Stdout, "cancelled")
@@ -170,7 +202,7 @@ class ConvertOp(work.Op):
             self.acknowledgeCancel()
         elif code != 0:
             _remove(job.output)
-            self.fail("ffmpeg exited with code %d: %s" % (code, " | ".join(tail[-3:])))
+            self.fail("%s exited with code %d: %s" % (conversion.tool, code, " | ".join(tail[-3:])))
         elif os.path.exists(output):
             _remove(job.output)
             self.fail("output exists")

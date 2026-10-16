@@ -6,6 +6,7 @@ and src/bindings.xml.  `PeelCore` (the work framework: Op, Pipeline, ...) is
 built in too.  convertapp.mainWindow() is the app's MainWindow, owned by C++.
 """
 import importlib
+import importlib.util
 import os
 import ssl
 import sys
@@ -83,6 +84,27 @@ def _import_pyside_modules():
     return failed
 
 
+def _fbx_problem():
+    """Why FBX reading is broken, or "" (also when ufbx is simply not part of this build:
+    debug builds and builds without app.json python_packages)."""
+    if importlib.util.find_spec("ufbx") is None:
+        return ""
+    try:
+        from convert import fbxinfo
+        with fbxinfo.load_bytes(_TINY_FBX) as scene:
+            fbxinfo.build_meta(scene, "check.fbx")
+    except Exception as exc:                  # the .pyd or numpy did not load, or ufbx failed
+        return f"ufbx is installed but does not work: {type(exc).__name__}: {exc}"
+    return ""
+
+
+_TINY_FBX = (b"; FBX 7.3.0 project file\n"
+             b"FBXHeaderExtension:  {\n\tFBXHeaderVersion: 1003\n\tFBXVersion: 7300\n}\n"
+             b"GlobalSettings:  {\n\tVersion: 1000\n\tProperties70:  {\n"
+             b'\t\tP: "UpAxis", "int", "Integer", "",2\n\t\tP: "UnitScaleFactor", "double", "Number", "",100\n'
+             b"\t}\n}\n")
+
+
 def report():
     from convert import registry
     from convert import tools
@@ -99,6 +121,7 @@ def report():
         f"{main_window().windowTitle()!r}, message {main_window().message()!r}",
         f"Conversions: {len(registry.all())}, problems: {registry.problems}",
         f"ffmpeg: {tools.find('ffmpeg')}",
+        f"FBX (ufbx): {_fbx_problem() or ('available' if importlib.util.find_spec('ufbx') else 'not in this build')}",
         "Loaded:",
     ]
     lines += [f"  {d}" for d in _dlls_named(dlls, "qt6core", "libssl", "libcrypto", "python3",
@@ -122,6 +145,9 @@ def check():
         problems += [f"conversion: {p}" for p in registry.problems]
     except Exception as exc:
         problems.append(f"convert/PeelCore: {type(exc).__name__}: {exc}")
+    fbx = _fbx_problem()
+    if fbx:
+        problems.append(fbx)
     text = report()
     dlls = loaded_dlls()
     win = main_window()

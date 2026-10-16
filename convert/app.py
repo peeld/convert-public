@@ -60,7 +60,7 @@ class Controller:
         missing = sorted({c.tool for c in registry.all() if tools.find(c.tool) is None})
         installing = self.installing()
         for name in missing:
-            if name in installing:
+            if tools.owner(name) in installing:
                 lines.append("Downloading %s... (see the queue)" % name)
             elif tools.install_problems(name):
                 lines.append("%s is not installed. Put it on the PATH, or set its path in settings.json "
@@ -172,7 +172,7 @@ class Controller:
         queued already.  Returns True if it queued any (the caller starts the queue)."""
         queued = False
         busy = self.installing()
-        for name in sorted({c.tool for c in registry.all() if tools.find(c.tool) is None}):
+        for name in sorted({tools.owner(c.tool) for c in registry.all() if tools.find(c.tool) is None}):
             if name in busy or tools.install_problems(name):
                 continue
             op = InstallToolOp("Install " + name)

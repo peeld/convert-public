@@ -39,6 +39,9 @@ Python:
         command = ("-i", "{input}", "-q:a", "2", "{output}")
 
 Override `build_command(job)` (and `accepts`) when a list of arguments is not enough.
+Set `runs_itself = True` and override `run(job, cancel, on_process)` when the result is not
+"run the tool, it writes the output" (see conversions/metadata.py, which reads ffprobe's
+output and writes a `.meta` file).  Override `output_name()` to name the output differently.
 """
 import importlib
 import importlib.util
@@ -49,6 +52,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 JSON_FIELDS = ("id", "label", "group", "tool", "inputs", "output_ext", "command", "args", "class")
+
+
+class ConversionError(Exception):
+    """Raised by Conversion.run(); the message is shown to the user as the Op's error."""
 
 
 @dataclass
@@ -68,6 +75,7 @@ class Conversion:
     output_ext = ""
     command = ()         # tool arguments with {input} and {output}
     args = None          # reserved: arguments the user will be able to set
+    runs_itself = False  # True: ConvertOp calls run() instead of launching the tool with `command`
 
     def accepts(self, path):
         wanted = [e.lower().lstrip(".") for e in self.inputs]
@@ -82,6 +90,19 @@ class Conversion:
         """Arguments for the tool (not the executable itself)."""
         return [a.replace("{input}", job.input).replace("{output}", job.output) for a in self.command]
 
+    def run(self, job, cancel, on_process=None):
+        """Only for `runs_itself` conversions: do the work and write job.output.
+
+        Must not import PeelCore or Qt.  `cancel` is a threading.Event to check; pass
+        every child process to `on_process(proc)` so cancel can terminate it.  Raise
+        ConversionError with a user-readable message to fail."""
+        raise NotImplementedError
+
+    def unavailable(self):
+        """Why this conversion cannot run in this build ("" when it can).  Checked in
+        addition to the tool being installed."""
+        return ""
+
     def problems(self):
         out = []
         if not self.id:
@@ -94,7 +115,10 @@ class Conversion:
             out.append("no tool")
         if not self.output_ext:
             out.append("no output_ext")
-        if type(self).build_command is Conversion.build_command:
+        if self.runs_itself:
+            if type(self).run is Conversion.run:
+                out.append("runs_itself but no run()")
+        elif type(self).build_command is Conversion.build_command:
             if not self.command:
                 out.append("no command")
             else:

@@ -289,7 +289,7 @@ print("progress=end")
 '''
 
 
-class OpTests(unittest.TestCase):
+class OpTestBase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
@@ -328,6 +328,9 @@ class OpTests(unittest.TestCase):
         self.assertTrue(op.launch(self.work.Params(), {}))
         self.assertTrue(op.settled.wait(timeout), "op did not settle")
 
+
+
+class OpTests(OpTestBase):
     def test_converts_and_renames_the_temp_file(self):
         op, src, out = self.make()
         self.run_op(op)
@@ -432,6 +435,39 @@ class ToolTests(unittest.TestCase):
         finally:
             tools.platform_key = orig
 
+    def test_ffprobe_comes_with_ffmpeg(self):
+        from convert import tools
+        self.assertEqual(tools.owner("ffprobe"), "ffmpeg")
+        self.assertEqual(tools.owner("ffmpeg"), "ffmpeg")
+        orig = tools.platform_key
+        tools.platform_key = lambda: "windows-x86_64"
+        try:
+            self.assertEqual(tools.install_problems("ffprobe"), [])      # installs ffmpeg's zip
+        finally:
+            tools.platform_key = orig
+
+    def test_ffprobe_is_found_beside_a_configured_ffmpeg(self):
+        from convert import tools
+        tmp = tempfile.TemporaryDirectory()
+        saved = os.environ.get("APPDATA")
+        try:
+            os.environ["APPDATA"] = tmp.name
+            (Path(tmp.name) / "PeelConvert").mkdir()
+            bin_dir = Path(tmp.name) / "bin"
+            bin_dir.mkdir()
+            names = ["ffmpeg.exe", "ffprobe.exe"] if sys.platform == "win32" else ["ffmpeg", "ffprobe"]
+            for name in names:
+                (bin_dir / name).write_text("x")
+            (Path(tmp.name) / "PeelConvert" / "settings.json").write_text(
+                json.dumps({"tools": {"ffmpeg": str(bin_dir / names[0])}}))
+            self.assertEqual(Path(tools.find("ffprobe")), bin_dir / names[1])
+        finally:
+            if saved is None:
+                os.environ.pop("APPDATA", None)
+            else:
+                os.environ["APPDATA"] = saved
+            tmp.cleanup()
+
     def test_parse_checksums_picks_the_line_for_the_file(self):
         from convert import tools
         self.assertEqual(tools.parse_checksums(self.CHECKSUMS, "ffmpeg-master-latest-win64-lgpl.zip"), "bbb222")
@@ -464,6 +500,147 @@ class ToolTests(unittest.TestCase):
         finally:
             (tools.platform_key, tools._fetch, tools._expected_hash, tools.user_data_dir, tools.manifest) = saved
             tmp.cleanup()
+
+
+# ---- metadata (.meta) -------------------------------------------------------------------
+RAW_MOV = {
+    "format": {"format_name": "mov,mp4", "format_long_name": "QuickTime / MOV", "duration": "10.01",
+               "size": "1000", "bit_rate": "800", "tags": {"encoder": "x"}},
+    "streams": [
+        {"index": 0, "codec_type": "video", "codec_name": "prores", "width": 1920, "height": 1080,
+         "avg_frame_rate": "30000/1001", "nb_frames": "300", "duration": "10.01",
+         "tags": {"timecode": "01:02:03;04"},
+         "side_data_list": [{"side_data_type": "Display Matrix", "rotation": -90}]},
+        {"index": 1, "codec_type": "audio", "codec_name": "pcm_s24le", "sample_rate": "48000", "channels": 2},
+        {"index": 2, "codec_type": "data", "codec_tag_string": "tmcd", "tags": {"timecode": "01:02:03;04"}},
+    ],
+}
+
+
+class MediaInfoTests(unittest.TestCase):
+    def meta(self, raw=RAW_MOV, path="/x/foo.mov"):
+        from convert import mediainfo
+        return mediainfo.build_meta(raw, path)
+
+    def test_video_fields(self):
+        v = self.meta()["video"][0]
+        self.assertEqual(v["resolution"], "1920x1080")
+        self.assertEqual((v["width"], v["height"]), (1920, 1080))
+        self.assertEqual(v["frame_count"], 300)
+        self.assertEqual(v["frame_count_source"], "container")
+        self.assertAlmostEqual(v["frame_rate"], 29.97003, places=5)
+        self.assertEqual(v["frame_rate_text"], "30000/1001")
+        self.assertEqual(v["rotation"], -90)
+        self.assertEqual(v["timecode"], "01:02:03;04")
+
+    def test_top_level_timecode_and_file(self):
+        m = self.meta()
+        self.assertEqual(m["schema"], 1)
+        self.assertEqual(m["timecode"], "01:02:03;04")
+        self.assertEqual(m["file"]["name"], "foo.mov")
+        self.assertEqual(m["file"]["duration"], 10.01)
+        self.assertEqual(m["audio"][0]["sample_rate"], 48000)
+
+    def test_timecode_is_null_when_absent(self):
+        raw = {"format": {}, "streams": [{"index": 0, "codec_type": "video", "codec_name": "h264",
+                                          "width": 2, "height": 2, "r_frame_rate": "25/1"}]}
+        m = self.meta(raw)
+        self.assertIn("timecode", m)
+        self.assertIsNone(m["timecode"])
+        self.assertNotIn("timecode", m["video"][0])
+
+    def test_frame_count_falls_back_to_packets_then_estimate(self):
+        stream = {"index": 0, "codec_type": "video", "r_frame_rate": "25/1", "duration": "4.0"}
+        v = self.meta({"format": {}, "streams": [dict(stream, nb_read_packets="99")]})["video"][0]
+        self.assertEqual((v["frame_count"], v["frame_count_source"]), (99, "packets"))
+        v = self.meta({"format": {}, "streams": [stream]})["video"][0]
+        self.assertEqual((v["frame_count"], v["frame_count_source"]), (100, "estimated"))
+
+    def test_junk_values_are_left_out(self):
+        raw = {"format": {"duration": "N/A"}, "streams": [{"index": 0, "codec_type": "video",
+               "avg_frame_rate": "0/0", "r_frame_rate": "0/0", "nb_frames": "N/A", "bit_rate": "N/A"}]}
+        m = self.meta(raw)
+        self.assertNotIn("duration", m["file"])
+        for key in ("frame_rate", "frame_count", "bit_rate"):
+            self.assertNotIn(key, m["video"][0])
+
+
+FAKE_FFPROBE = r"""#!{python}
+import json, sys
+args = sys.argv[1:]
+path = args[args.index("-i") + 1]
+text = open(path).read()
+if text.startswith("FAIL"):
+    sys.stderr.write("moov atom not found\n"); sys.exit(1)
+if text.startswith("SLOW"):
+    import time; time.sleep(30)
+video = {{"index": 0, "codec_type": "video", "codec_name": "h264", "width": 640, "height": 360,
+          "avg_frame_rate": "25/1", "tags": {{"timecode": "10:00:00:00"}}}}
+if "-count_packets" in args:
+    video["nb_read_packets"] = "50"
+print(json.dumps({{"format": {{"format_name": "mov", "duration": "2.0"}}, "streams": [video]}}))
+"""
+
+
+class MetaOpTests(OpTestBase):
+    def setUp(self):
+        super().setUp()
+        fake = self.root / "ffprobe"
+        fake.write_text(FAKE_FFPROBE.format(python=sys.executable))
+        fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+        settings = self.appdata / "PeelConvert" / "settings.json"
+        data = json.loads(settings.read_text())
+        data["tools"]["ffprobe"] = str(fake)
+        settings.write_text(json.dumps(data))
+        conv_mod.registry.register(self._meta_conversion())
+
+    @staticmethod
+    def _meta_conversion():
+        import importlib.util
+        path = Path(conv_mod.shipped_dir()) / "metadata.py"
+        spec = importlib.util.spec_from_file_location("convert_meta_under_test", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module.MediaMeta()
+
+    def make_meta(self, text="hello", name="a.mov"):
+        src = self.root / name
+        src.write_text(text)
+        op = self.ops.ConvertOp(name)
+        op.setProperty("conversion", "media.meta")
+        op.setProperty("input", str(src))
+        op.setProperty("output", str(self.root / (name + ".meta")))
+        return op, src, self.root / (name + ".meta")
+
+    def test_output_is_input_name_plus_meta(self):
+        self.assertEqual(self._meta_conversion().output_name("C:/clips/foo.mov"), "foo.mov.meta")
+
+    def test_writes_json_beside_the_source(self):
+        op, src, out = self.make_meta()
+        self.run_op(op)
+        self.assertEqual(op.state(), self.work.OpState.Finished)
+        meta = json.loads(out.read_text(encoding="utf-8"))
+        self.assertEqual(meta["video"][0]["resolution"], "640x360")
+        self.assertEqual(meta["video"][0]["frame_count"], 50)          # second pass: packets
+        self.assertEqual(meta["timecode"], "10:00:00:00")
+        self.assertEqual(sorted(p.name for p in self.root.glob("a.*")), ["a.mov", "a.mov.meta"])
+
+    def test_unreadable_file_fails_with_ffprobes_message_and_leaves_nothing(self):
+        op, src, out = self.make_meta("FAIL")
+        self.run_op(op)
+        self.assertEqual(op.state(), self.work.OpState.Failed)
+        self.assertIn("moov atom not found", op.error)
+        self.assertFalse(out.exists())
+        self.assertEqual(list(self.root.glob("*.converting*")), [])
+
+    def test_cancel_stops_ffprobe(self):
+        op, src, out = self.make_meta("SLOW")
+        self.assertTrue(op.launch(self.work.Params(), {}))
+        import time; time.sleep(1)
+        op.requestCancel()
+        self.assertTrue(op.settled.wait(10))
+        self.assertEqual(op.state(), self.work.OpState.Cancelled)
+        self.assertFalse(out.exists())
 
 
 if __name__ == "__main__":
