@@ -52,7 +52,7 @@ from fractions import Fraction
 from . import mediainfo
 
 SCHEMA = 1
-BUILTIN_MESSAGE = "FBX support is not part of this build of PeelConvert (the ufbx library is missing)"
+BUILTIN_MESSAGE = "FBX support is not part of this build of the app (the ufbx library is missing)"
 
 
 class FbxError(Exception):

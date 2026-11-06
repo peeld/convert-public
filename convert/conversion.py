@@ -265,9 +265,9 @@ def shipped_dir():
 
 
 def user_data_dir():
-    """The same folder the C++ side keeps PeelConvert.ini in."""
-    base = os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), ".config")
-    return Path(base) / "PeelConvert"
+    """The app's user data folder (convert.host): settings.json, tools, userPython."""
+    from . import host
+    return host.user_data_dir()
 
 
 def user_python_dir():
@@ -281,7 +281,7 @@ def user_dir():
 
 
 def migrate_user_conversions():
-    """Move files from the old %APPDATA%/PeelConvert/conversions into userPython/conversions.
+    """Move files from the old <user data>/conversions into userPython/conversions.
     Never overwrites; a file that already exists in the new place stays behind (and is reported).
     Returns (moved, left_behind) lists of file names."""
     old, new = user_data_dir() / "conversions", user_dir()

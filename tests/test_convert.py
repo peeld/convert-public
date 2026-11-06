@@ -217,7 +217,7 @@ class UserPythonTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.old_appdata = os.environ.get("APPDATA")
         os.environ["APPDATA"] = self.tmp.name
-        self.root = Path(self.tmp.name) / "PeelConvert"
+        self.root = Path(self.tmp.name) / "TestApp"
 
     def tearDown(self):
         if self.old_appdata is None:
@@ -300,8 +300,8 @@ class OpTestBase(unittest.TestCase):
         fake = self.root / "ffmpeg"
         fake.write_text(FAKE_FFMPEG.format(python=sys.executable))
         fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
-        (self.appdata / "PeelConvert").mkdir()
-        (self.appdata / "PeelConvert" / "settings.json").write_text(json.dumps({"tools": {"ffmpeg": str(fake)}}))
+        (self.appdata / "TestApp").mkdir()
+        (self.appdata / "TestApp" / "settings.json").write_text(json.dumps({"tools": {"ffmpeg": str(fake)}}))
         conv_mod.registry.clear()
         conv_mod.registry.register(mp4())
         from convert import ops
@@ -387,7 +387,7 @@ class OpTests(OpTestBase):
         self.assertIn("input file not found", op.validationProblems())
 
     def test_missing_tool_is_reported(self):
-        (self.appdata / "PeelConvert" / "settings.json").write_text("{}")
+        (self.appdata / "TestApp" / "settings.json").write_text("{}")
         from convert import tools
         orig = tools.shutil.which
         tools.shutil.which = lambda name: None
@@ -452,13 +452,13 @@ class ToolTests(unittest.TestCase):
         saved = os.environ.get("APPDATA")
         try:
             os.environ["APPDATA"] = tmp.name
-            (Path(tmp.name) / "PeelConvert").mkdir()
+            (Path(tmp.name) / "TestApp").mkdir()
             bin_dir = Path(tmp.name) / "bin"
             bin_dir.mkdir()
             names = ["ffmpeg.exe", "ffprobe.exe"] if sys.platform == "win32" else ["ffmpeg", "ffprobe"]
             for name in names:
                 (bin_dir / name).write_text("x")
-            (Path(tmp.name) / "PeelConvert" / "settings.json").write_text(
+            (Path(tmp.name) / "TestApp" / "settings.json").write_text(
                 json.dumps({"tools": {"ffmpeg": str(bin_dir / names[0])}}))
             self.assertEqual(Path(tools.find("ffprobe")), bin_dir / names[1])
         finally:
@@ -588,7 +588,7 @@ class MetaOpTests(OpTestBase):
         fake = self.root / "ffprobe"
         fake.write_text(FAKE_FFPROBE.format(python=sys.executable))
         fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
-        settings = self.appdata / "PeelConvert" / "settings.json"
+        settings = self.appdata / "TestApp" / "settings.json"
         data = json.loads(settings.read_text())
         data["tools"]["ffprobe"] = str(fake)
         settings.write_text(json.dumps(data))

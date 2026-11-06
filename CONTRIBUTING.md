@@ -1,11 +1,11 @@
-# Contributing to PeelConvert's operations
+# Contributing to the Peel apps' file operations
 
-This repository is the Python side of PeelConvert. You can add or improve conversions and
+This repository holds the file operations PeelConvert (and other Peel apps) run. You can add or improve conversions and
 send them back as a pull request. Nothing reaches other users until the maintainer has
 reviewed it, merged it, and signed and published a release.
 
 **Just want an operation for yourself?** You do not need any of this. Put it in your
-`userPython` folder (`%APPDATA%\PeelConvert\userPython\conversions\`) and press Reload;
+`userPython` folder (e.g. `%APPDATA%\PeelConvert\userPython\conversions\`) and press Reload;
 updates never touch it. `AGENTS.md` explains how conversions work, and it is written for
 coding agents as much as for people.
 

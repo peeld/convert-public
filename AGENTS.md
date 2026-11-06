@@ -1,11 +1,16 @@
-# AGENTS.md — PeelConvert: editing and adding operations
+# AGENTS.md — convert-public: editing and adding operations
 
-This file is for coding agents changing what PeelConvert can do: adding a
+This file is for coding agents changing the file operations Peel apps offer: adding a
 conversion, changing an existing one, adding a tool other than ffmpeg, or adding
 a new kind of Op. Read it before you touch `convert/`.
 
-This repository (`convert-public`) is the Python side of PeelConvert. In the app's
-source tree it is mounted at `python/`; in an install it is the `scripts/` folder.
+This repository (`convert-public`) holds the file operations every Peel app that
+offers them loads. PeelConvert is a thin window over it; other apps (PeelPost) add
+its operations to their own menus. It never knows which app runs it: it asks
+`convert/host.py`, which asks the app (§1.1). In PeelConvert's source tree it is
+mounted at `python/`; in an install it is part of the `scripts/` folder.
+PeelConvert's window glue (`convert_startup.py`, `convert_controller.py`) lives
+in PeelConvert's repo (`app_python/`), not here.
 Paths below are relative to this repository's root. Build, packaging and release of
 the app are covered in the app repo's `README.md`; the work framework (Op, Pipeline,
 executor) is described in its `Work Framework.md` and `core/cpp/work/README.md`.
@@ -15,17 +20,18 @@ This file covers only the conversion system that sits on top of them.
 
 | You want | Do this |
 |---|---|
-| An operation only for you | Put it in the user folder `%APPDATA%\PeelConvert\` (it survives updates and re-installs), press **Reload** in the app. |
+| An operation only for you | Put it in the app's user folder, `%APPDATA%\<app>\` (it survives updates and re-installs), press **Reload** in the app. |
 | An operation for everyone | Work in a clone of this repo, add the conversion and tests, open a pull request (see `CONTRIBUTING.md`). Every PR is reviewed by the maintainer. |
 | A C++ or binding change | Needs the app repository and a new installer; this repo cannot carry it. |
 
-User-folder locations:
+User-folder locations (`<app>` is the app running the operations, e.g. `PeelConvert`;
+`convert.host.user_data_dir()` gives the folder):
 
 | What | Where |
 |---|---|
-| conversions (`*.json`, `*.py`) | `%APPDATA%\PeelConvert\userPython\conversions\` |
-| tool definitions / downloads | `%APPDATA%\PeelConvert\tools.json` |
-| path to a tool you already have | `%APPDATA%\PeelConvert\settings.json` → `{"tools": {"<name>": "C:/path/tool.exe"}}` |
+| conversions (`*.json`, `*.py`) | `%APPDATA%\<app>\userPython\conversions\` |
+| tool definitions / downloads | `%APPDATA%\<app>\tools.json` |
+| path to a tool you already have | `%APPDATA%\<app>\settings.json` → `{"tools": {"<name>": "C:/path/tool.exe"}}` |
 
 Never edit the installed `scripts/` folder: updates and re-installs replace it.
 Recipe A (§4) and the `.py` part of §4.1 work from the user folder. Recipes B
@@ -36,7 +42,8 @@ source repositories.
 
 ## 1. The big picture
 
-PeelConvert is a Qt/C++ app with an embedded Python. The split is strict:
+Every Peel app is a Qt/C++ app with an embedded Python. PeelConvert is the
+example here; the split is strict:
 
 | Side | Owns | Knows nothing about |
 |---|---|---|
@@ -50,7 +57,7 @@ the tool on a worker thread and reports progress, logs and its final state back
 through thread-safe Op methods; the table follows the Pipeline automatically.
 
 ```
- ConvertPanel (C++)                      Controller (convert/app.py)
+ ConvertPanel (C++)                      Controller (PeelConvert's app_python/convert_controller.py)
  ───────────────────                     ──────────────────────────────────
  filesAdded(paths, conversionId) ──────► add_files: one ConvertOp per file,
                                           pipeline.addOp(op)
@@ -69,11 +76,16 @@ through thread-safe Op methods; the table follows the Pipeline automatically.
 
 1. `src/main.cpp` creates `MainWindow` (which contains a `ConvertPanel`) and calls
    `appPythonStart()` in `src/appPython.cpp`.
-2. `appPythonStart()` registers two built-in modules, **`PeelCore` first**, then
-   `convertapp` (it uses PeelCore's types), starts Python, and calls
-   `convert_startup.install()`.
-3. `convert_startup.py: install()` builds `convert.app.Controller(win.convertPanel())`
-   and keeps it in a module global so its signal connections live as long as the app.
+2. `appPythonStart()` fills a config for core's Python host
+   (`core/cpp/pythonhost/pythonHost.h`): the built-in modules, **`PeelCore` first**,
+   then `convertapp` (it uses PeelCore's types). The host adds `_peelhost`, picks
+   which copy of this repo to load (bundled, a signed update, a developer folder or
+   `--python-dir`, put ahead of the app's own folders on `sys.path`), starts Python
+   and calls `convert_startup.install()`.
+3. `convert_startup.py: install()` (in PeelConvert's repo) builds
+   `convert_controller.Controller(win.convertPanel())` and keeps it in a module
+   global so its signal connections live as long as the app, then
+   `convert.update_ui.install_update_service(window, help_menu, is_busy)`.
 4. `PeelConvert --python-check` calls `convert_startup.check()`, which imports
    every PySide6 module, loads the conversions, and fails if any shipped
    definition is invalid. `build.py package` runs this check on the installed app.
@@ -86,7 +98,7 @@ Where this code is loaded from:
   copied to `<app>/scripts/`. Re-run `stage` after Python changes.
 - The **Reload** button re-reads conversion definitions (JSON and `.py` files in the
   conversion folders) but does **not** reload the `convert` package modules. Changes to
-  `ops.py`, `app.py`, `tools.py` etc. need an app restart.
+  `ops.py`, `run.py`, `tools.py` etc. need an app restart.
 
 ### 1.2 The two built-in Python modules
 
@@ -98,6 +110,23 @@ Where this code is loaded from:
 Both are compiled into the exe. Neither can be imported by a plain `python`
 outside the app, which is why the tests use a fake PeelCore (§7).
 
+### 1.3 The host API (`_peelhost`, `manifest.json` `host_api`)
+
+What this repo may ask of the app is the **host API**. Its level is in
+`manifest.json` (`host_api` {min, max}); an app only loads a downloaded copy
+whose range contains the app's level. Level 2 is:
+
+- `PeelCore` (`work.Op`, `Params`, `Pipeline`, ...), and
+- `_peelhost`: `host_api()`, `app_name()`, `user_data_dir()`, `can_verify()`,
+  `verify(data, signature)`, `source()`, `exe_path()`, `bundled_dir()`.
+
+Only `convert/host.py` (and the updater glue in `update_ui.py`) touch `_peelhost`.
+An app's own module (`convertapp`) is not part of the host API: code here must not
+import it. Needing something new from the app means a new level, a new installer,
+and the fake in `tests/fakecore/` extended to match. Level 1 (PeelConvert before
+2026-11) had no `app_name()` / `user_data_dir()` and expected `convert_startup.py`
+in this repo.
+
 ---
 
 ## 2. The Python package, file by file
@@ -106,20 +135,21 @@ All paths are relative to this repository's root.
 
 | File | Role | Imports PeelCore? |
 |---|---|---|
-| `convert_startup.py` | Entry points called from C++: `install()` and `check()`/`report()`. | yes (in `check`) |
 | `convert/__init__.py` | Re-exports `Conversion`, `Job`, `register`, `registry`, `user_dir`. Only imports `conversion`, so conversion files can `from convert import ...` without PeelCore. | no |
 | `convert/conversion.py` | `Conversion` base class, `Job`, the `ConversionRegistry` (JSON and `.py` loading), folder locations. | no |
 | `convert/conversions/*.json` | Shipped conversion definitions (`ffmpeg.json` today). Any `.py` here is loaded too. | — |
 | `convert/paths.py` | Output-directory rules and the temp-file name. Pure functions, testable with `ntpath`/`posixpath`. | no |
 | `convert/tools.py` + `tools.json` | Find a tool's executable; download, verify (SHA-256) and unpack it. | no |
 | `convert/runner.py` | Global slot limit: how many conversion processes run at once (default 1). | no |
-| `convert/ops.py` | `ConvertOp` and `InstallToolOp`, the `work.Op` subclasses that do the work. | yes |
-| `convert/app.py` | `Controller`: wires the panel's signals to the registry, paths, tools and Ops. | yes |
-| `convert/check.py`, `__main__.py` | `python -m convert.check [folder ...]`: load and validate definitions, exit 1 on problems. | no |
-| `tests/test_convert.py`, `tests/fakecore/` | Unit tests, with a Python fake of `PeelCore.work`. | fake |
+| `convert/host.py` | What the running app says: `app_name()`, `user_data_dir()`, `api()`. The only place that asks `_peelhost`. | no |
+| `convert/run.py` | `run_conversion(...)`: one conversion on one file with log/progress/status callbacks and a cancel event; temp file, rename, cleanup. Runs anywhere (an Op, a worker process, a script). | no |
+| `convert/ops.py` | `ConvertOp` and `InstallToolOp`, the `work.Op` subclasses; `ConvertOp` runs `run_conversion()` on a worker thread. | yes |
+| `convert/check.py`, `__main__.py` | `python -m convert.check [--app NAME] [folder ...]`: load and validate definitions, exit 1 on problems. | no |
+| `tests/test_*.py`, `tests/fakecore/` | Unit tests, with Python fakes of `PeelCore.work` and `_peelhost` (app name `TestApp`). | fake |
 
-Keep that import boundary: **`conversion`, `paths`, `tools`, `runner` must never
-import PeelCore, Qt or `convertapp`.** That is what lets `convert.check` and most
+Keep that import boundary: **`conversion`, `paths`, `tools`, `runner`, `host`, `run` must
+never import PeelCore, Qt or an app's module (`convertapp`), and nothing here may
+name an app.** That is what lets `convert.check` and most
 tests run with a plain Python.
 
 ### 2.1 Conversions (`conversion.py`)
@@ -160,7 +190,7 @@ class Job:
 
 **Loading order** (`registry.load_all`): the shipped folder
 `convert/conversions/`, then the user folder
-`%APPDATA%\PeelConvert\userPython\conversions\`. In each folder, every `*.py` is executed
+`%APPDATA%\<app>\userPython\conversions\`. In each folder, every `*.py` is executed
 first (sorted by name), then every `*.json`. A later definition with the same
 `id` replaces an earlier one, so a user can override a shipped conversion.
 
@@ -232,22 +262,26 @@ Life of one ConvertOp:
    It is called again whenever a property changes, on Reload, and when the queue
    goes idle (a tool may have just been installed).
 3. **`start(inputs, upstream)`** runs on the **Qt main thread with the GIL held**.
-   It must return at once: it builds a `Job` with
-   `output = paths.temp_name(output)` (`a.mp4` → `a.converting.mp4`, keeping the
-   extension so the tool picks the right format) and starts a daemon thread.
+   It must return at once: it starts a daemon thread.
 4. **Worker thread (`_run`)**: waits for a slot in `runner` (status
-   "Waiting for a free slot"; cancellable), then `_execute`:
+   "Waiting for a free slot"; cancellable), then calls
+   `run.run_conversion(conversion, input, output, tool_path, log=, progress=, status=,
+   cancel=, on_process=)` with the Op's own methods as the callbacks. It writes
+   `paths.temp_name(output)` (`a.mp4` → `a.converting.mp4`, keeping the extension so
+   the tool picks the right format) and:
    - argv = `[tool_path, "-nostdin", "-hide_banner", "-nostats", "-progress", "pipe:1", "-y"] + conversion.build_command(job)`
    - `subprocess.Popen` with `CREATE_NO_WINDOW`, stdin = DEVNULL.
    - stderr is read on a second thread: every line goes to the Op's stderr log,
      the last 12 are kept for the error message, and ffmpeg's `Duration:` line
-     gives the total length.
+     gives the total length (progress lines that come before it are replayed).
    - stdout is parsed as ffmpeg `-progress` output (`out_time_us=...`) to call
-     `setProgress()` and `setStatus("Converting: N%")`. **stdout lines are not logged.**
-5. **`_finish`**: cancelled → delete the temp file, `acknowledgeCancel()`;
-   non-zero exit → delete temp file, `fail("ffmpeg exited with code N: <last stderr lines>")`;
-   final output appeared meanwhile → `fail("output exists")`;
-   otherwise `os.replace(temp, output)` and `complete(Params{output: path})`.
+     `progress()` and `status("Converting: N%")`. **stdout lines are not logged.**
+5. **The outcome**: cancelled → temp file deleted, `run.Cancelled` raised, the Op
+   calls `acknowledgeCancel()`; non-zero exit → temp file deleted,
+   `ConversionError("ffmpeg exited with code N: <last stderr lines>")`, the Op fails
+   with it; final output appeared meanwhile → `ConversionError("output exists")`;
+   otherwise `os.replace(temp, output)`, the path is returned and the Op calls
+   `complete(Params{output: path})`.
 6. Any exception in the worker → temp file removed, `fail(...)` (or
    `acknowledgeCancel()` if cancel was requested). **An Op must never be left RUNNING.**
 7. **`onCancel()`** (called from the Cancel/Remove/Clear buttons) sets the cancel
@@ -257,14 +291,14 @@ Life of one ConvertOp:
 
 `tools.find(name)` returns the executable path or `None`, trying in order:
 
-1. `%APPDATA%\PeelConvert\settings.json` → `{"tools": {"<name>": "C:/path/to/exe"}}`
-2. `%APPDATA%\PeelConvert\tools\<name>\**\<exe>` (where downloads are unpacked)
+1. `%APPDATA%\<app>\settings.json` → `{"tools": {"<name>": "C:/path/to/exe"}}`
+2. `%APPDATA%\<app>\tools\<name>\**\<exe>` (where downloads are unpacked)
 3. `PATH` (`shutil.which`)
 
 `<exe>` is the entry's `"exe"` (default: the tool name), with `.exe` tried first on Windows.
 
 `tools.json` (shipped copy next to `tools.py`, merged with
-`%APPDATA%\PeelConvert\tools.json`, user entries win per name):
+`%APPDATA%\<app>\tools.json`, user entries win per name):
 
 ```json
 {
@@ -365,7 +399,7 @@ Only when Python needs a new UI capability (a new widget, signal or method):
    `CLASSES` and its header in `DEPENDS` of `peel_add_python_bindings` in
    `CMakeLists.txt`, and its sources in `peel_add_app(... SOURCES ...)`.
 4. `python build.py build` regenerates the bindings. Then use it from
-   `convert/app.py`.
+   PeelConvert's `app_python/convert_controller.py`.
 5. Keep conversion knowledge out of C++. The panel stays generic.
 
 ---
@@ -376,7 +410,7 @@ Usually JSON only, no code.
 
 1. Pick the file: add to `convert/conversions/ffmpeg.json` to ship it, or
    create a new `*.json` in that folder for a separate group. (Users put theirs in
-   `%APPDATA%\PeelConvert\userPython\conversions\`.)
+   `%APPDATA%\<app>\userPython\conversions\`.)
 2. Add an entry:
    ```json
    {
@@ -453,12 +487,12 @@ definitions will work.
 
 ### 5.1 What is ffmpeg-specific today
 
-| Where (`convert/ops.py`) | ffmpeg assumption |
+| Where (`convert/run.py`) | ffmpeg assumption |
 |---|---|
-| `ConvertOp._execute`: argv prefix | `-nostdin -hide_banner -nostats -progress pipe:1 -y` |
-| `ConvertOp._execute`: stdout loop → `_progress` | stdout is `key=value` progress; other lines are dropped, not logged |
-| `_read_stderr` / `_DURATION` | total length comes from a `Duration:` line on stderr |
-| `_finish` | error text says "ffmpeg exited with code N" |
+| `_run_tool`: argv prefix | `-nostdin -hide_banner -nostats -progress pipe:1 -y` |
+| `_run_tool`: stdout loop → `_Progress` | stdout is `key=value` progress; other lines are dropped, not logged |
+| `read_stderr` / `_DURATION` | total length comes from a `Duration:` line on stderr |
+| `run_conversion` | error text says "<tool> exited with code N" |
 | `paths.temp_name` docstring | "where ffmpeg writes" (behaviour is generic) |
 
 Everything else is already tool-agnostic: `Conversion.tool`, `tools.find`,
@@ -486,14 +520,13 @@ unchanged:
      output names.
    - Keep these out of `JSON_FIELDS` unless a JSON form is needed; a tool with
      special parsing gets a Python subclass (`"class": ...`).
-2. In `ops.py`, make `_execute` call `conversion.base_args(job)`, feed each stdout
+2. In `run.py`, make `_run_tool` call `conversion.base_args(job)`, feed each stdout
    and stderr line to the matching `parse_*` hook, call `setProgress`/`setStatus`
-   when it returns a value, **log non-progress stdout lines** to the stdout log,
-   and use `conversion.tool` in the failure message.
+   when it returns a value, and **log non-progress stdout lines** to the stdout log.
 3. Run the existing tests unchanged — they cover the ffmpeg path (progress,
    status, temp-file rename, failure cleanup, cancel). Add tests for a second fake
    tool (see §7) with no progress output and with its own progress format.
-4. Update `convert_startup.report()` if it should list every tool, not just ffmpeg.
+4. Update PeelConvert's `convert_startup.report()` (app repo) if it should list every tool, not just ffmpeg.
 
 ### 5.3 Then, for each new tool
 
@@ -582,7 +615,8 @@ class SomethingOp(work.Op):
 Then:
 
 1. Register it in `register_types()` so a saved queue can rebuild it.
-2. Create and queue it from `convert/app.py` (`self.pipeline.addOp(op)`, then
+2. Create and queue it from the app's glue, e.g. PeelConvert's
+   `app_python/convert_controller.py` (`self.pipeline.addOp(op)`, then
    `self.panel.run()` if it should start immediately). If the Controller filters
    by class (`convert_ops()`, `installing()`), decide whether the new Op belongs
    in those lists.

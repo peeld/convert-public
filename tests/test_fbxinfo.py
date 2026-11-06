@@ -246,7 +246,7 @@ class OpTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self._env = dict(os.environ)
         os.environ["APPDATA"] = str(self.root / "appdata")
-        (self.root / "appdata" / "PeelConvert").mkdir(parents=True)
+        (self.root / "appdata" / "TestApp").mkdir(parents=True)
         conv_mod.registry.clear()
         from convert.conversions.fbx_meta import FbxMeta
         conv_mod.registry.register(FbxMeta())
