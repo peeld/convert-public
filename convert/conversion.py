@@ -16,6 +16,8 @@ JSON (one object, or a list of objects, per file):
       "tool": "ffmpeg",
       "inputs": ["mov", "mkv"],
       "output_ext": "mp4",
+      "output": "{stem}.mp4",
+      "version": 1,
       "command": ["-i", "{input}", "-c:v", "libx264", "-c:a", "aac", "{output}"],
       "class": "my_file.MyConversion",
       "args": null
@@ -24,6 +26,15 @@ JSON (one object, or a list of objects, per file):
 `group` is required and must not be empty: it is the name the group combo box shows
 ("Video", "Audio", ...) and files the conversion under.  `class` is optional: "<stem of a .py file in the same folder>.<ClassName>" or a
 dotted import path.  `args` is reserved for a later round and ignored.
+
+`output` names the file written, from the input's name: `{stem}` (the name without its
+last extension), `{name}` (the whole file name), `{ext}` (its extension, no dot).  It is
+optional; the default is "{stem}.<output_ext>".  A name only, no folder: the app decides
+where it goes.  `version` (a whole number, default 1) is bumped when what the conversion
+writes changes, so an app that keeps past runs knows they are out of date.
+
+Which files and what name are data (`inputs`, `output`) so an app can match many files
+without calling Python for each; registry.describe() gives them as plain values.
 
 Python:
 
@@ -38,10 +49,12 @@ Python:
         output_ext = "mp3"
         command = ("-i", "{input}", "-q:a", "2", "{output}")
 
-Override `build_command(job)` (and `accepts`) when a list of arguments is not enough.
+Override `build_command(job)` when a list of arguments is not enough.  Overriding
+`accepts` or `output_name` still works, but describe() then marks the conversion as
+needing Python per file.
 Set `runs_itself = True` and override `run(job, cancel, on_process)` when the result is not
 "run the tool, it writes the output" (see conversions/metadata.py, which reads ffprobe's
-output and writes a `.meta` file).  Override `output_name()` to name the output differently.
+output and writes a `.meta` file).
 """
 import importlib
 import importlib.util
@@ -51,7 +64,9 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-JSON_FIELDS = ("id", "label", "group", "tool", "inputs", "output_ext", "command", "args", "class")
+JSON_FIELDS = ("id", "label", "group", "tool", "inputs", "output_ext", "output", "version",
+               "command", "args", "class")
+OUTPUT_TOKENS = ("{stem}", "{name}", "{ext}")
 
 
 class ConversionError(Exception):
@@ -73,6 +88,8 @@ class Conversion:
     tool = "ffmpeg"
     inputs = ()          # accepted input extensions, no dot; empty or "*" = anything
     output_ext = ""
+    output = ""          # name template ({stem}, {name}, {ext}); "" = "{stem}.<output_ext>"
+    version = 1          # bump when what it writes changes
     command = ()         # tool arguments with {input} and {output}
     args = None          # reserved: arguments the user will be able to set
     runs_itself = False  # True: ConvertOp calls run() instead of launching the tool with `command`
@@ -82,9 +99,28 @@ class Conversion:
         ext = os.path.splitext(path)[1].lstrip(".").lower()
         return not wanted or "*" in wanted or ext in wanted
 
+    def output_template(self):
+        return self.output or "{stem}." + self.output_ext.lstrip(".")
+
     def output_name(self, input_path):
-        stem = os.path.splitext(os.path.basename(input_path))[0]
-        return stem + "." + self.output_ext.lstrip(".")
+        name = os.path.basename(input_path)
+        stem, ext = os.path.splitext(name)
+        return (self.output_template().replace("{stem}", stem).replace("{name}", name)
+                .replace("{ext}", ext.lstrip(".")))
+
+    def describe(self):
+        """This conversion as plain values, for an app that matches files itself.
+        `python_accepts` / `python_output`: accepts() / output_name() is overridden, so
+        `inputs` / `output` alone don't say which files or what name."""
+        cls = type(self)
+        return {
+            "id": self.id, "label": self.label, "group": self.group, "tool": self.tool,
+            "version": self.version,
+            "inputs": sorted({e.lower().lstrip(".") for e in self.inputs}),
+            "output": self.output_template(),
+            "python_accepts": cls.accepts is not Conversion.accepts,
+            "python_output": cls.output_name is not Conversion.output_name,
+        }
 
     def build_command(self, job):
         """Arguments for the tool (not the executable itself)."""
@@ -113,8 +149,20 @@ class Conversion:
             out.append("no group")
         if not self.tool:
             out.append("no tool")
-        if not self.output_ext:
+        if not self.output_ext and not self.output:
             out.append("no output_ext")
+        if self.output:
+            text = self.output
+            for token in OUTPUT_TOKENS:
+                text = text.replace(token, "")
+            if "{" in text or "}" in text:
+                out.append("output has an unknown {token}: " + self.output)
+            if "/" in self.output or "\\" in self.output:
+                out.append("output is a file name, not a path: " + self.output)
+            if "{stem}" not in self.output and "{name}" not in self.output:
+                out.append("output needs {stem} or {name}, or every input writes the same file")
+        if isinstance(self.version, bool) or not isinstance(self.version, int) or self.version < 1:
+            out.append("version must be a whole number, 1 or more")
         if self.runs_itself:
             if type(self).run is Conversion.run:
                 out.append("runs_itself but no run()")
@@ -152,6 +200,10 @@ class ConversionRegistry:
 
     def all(self):
         return sorted(self._items.values(), key=lambda c: (c.group.lower(), c.label.lower(), c.id))
+
+    def describe(self):
+        """Every conversion's describe(), in all() order."""
+        return [c.describe() for c in self.all()]
 
     def clear(self):
         self._items.clear()
@@ -212,6 +264,9 @@ class ConversionRegistry:
         unknown = sorted(set(entry) - set(JSON_FIELDS))
         if unknown:
             self.problems.append("%s: unknown field(s) %s" % (label, ", ".join(unknown)))
+            return
+        if "output" in entry and not isinstance(entry["output"], str):
+            self.problems.append("%s: output must be a string" % label)
             return
         for field in ("inputs", "command"):
             value = entry.get(field)

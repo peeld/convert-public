@@ -166,14 +166,29 @@ class Conversion:
     tool = "ffmpeg"    # a tool name: key in tools.json / settings.json, or an exe on PATH
     inputs = ()        # accepted extensions without the dot; empty or "*" = anything
     output_ext = ""    # extension of the file written
+    output = ""        # name of the file written: {stem}, {name}, {ext}; "" = "{stem}.<output_ext>"
+    version = 1        # bump when what it writes changes: an app's past runs then count as out of date
     command = ()       # tool arguments with {input} and {output} placeholders
     args = None        # reserved for user-settable arguments; ignored today
 
     def accepts(self, path) -> bool          # extension check, case-insensitive
-    def output_name(self, input_path) -> str  # "<stem>.<output_ext>"
+    def output_name(self, input_path) -> str  # the `output` template filled in
     def build_command(self, job) -> list[str] # arguments only, NOT the executable
+    def describe(self) -> dict                # plain values for an app (below)
     def problems(self) -> list[str]           # why this definition is invalid; [] if fine
 ```
+
+**Which files and what name are data.** An app such as PeelPost asks about every
+file of a day's scan, so it reads `registry.describe()` once (the same thing
+`python -m convert.check --json` prints) and matches extensions itself instead of
+calling Python per file. Each entry: `id, label, group, tool, version, inputs`
+(lower case, no dot, sorted), `output` (the template), and `python_accepts` /
+`python_output`, true when `accepts()` / `output_name()` is overridden and the
+data alone doesn't answer. Prefer `inputs` and `output` to overriding: every
+shipped conversion is pure data here (a test checks it). `output` is a file
+name, not a path: the app chooses the folder. `{stem}` is the name without its
+last extension (`a.tar.gz` → `a.tar`), `{name}` the whole name, `{ext}` the
+extension without the dot as written.
 
 `Job` is what `build_command` receives:
 
@@ -185,7 +200,9 @@ class Job:
     tool_path: str    # full path of the tool's executable
 ```
 
-`problems()` requires `id`, `label`, a non-blank `group`, `tool`, `output_ext`, and — **only if
+`problems()` requires `id`, `label`, a non-blank `group`, `tool`, `output_ext` (or an
+`output`), an `output` with `{stem}` or `{name}`, no unknown `{token}` and no folder in
+it, a `version` that is a whole number of 1 or more, and — **only if
 `build_command` is not overridden** — a non-empty `command` containing both
 `{input}` and `{output}`.
 
@@ -201,9 +218,9 @@ the yellow notice, and `--python-check` / `convert.check` fail on any.
 
 **JSON format.** A file holds one object, a list of objects, or
 `{"conversions": [...]}`. Allowed keys are exactly `JSON_FIELDS`:
-`id, label, group, tool, inputs, output_ext, command, args, class`. **Any other key
+`id, label, group, tool, inputs, output_ext, output, version, command, args, class`. **Any other key
 rejects the entry** (this catches typos). `inputs` and `command` must be lists
-of strings. `class` names a `Conversion` subclass, either
+of strings, `output` a string. `class` names a `Conversion` subclass, either
 `"<stem of a .py in the same folder>.<ClassName>"` or a dotted import path; the
 JSON fields are then set on an instance of that class.
 

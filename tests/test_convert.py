@@ -122,6 +122,52 @@ class ConversionTests(unittest.TestCase):
         self.assertGreaterEqual(len(r.all()), 9)
         self.assertIsNotNone(r.get("video.to-mp4"))
 
+    def test_output_template(self):
+        c = mp4()
+        self.assertEqual(c.output_name("/a/take 1.mov"), "take 1.mp4")     # default {stem}.<output_ext>
+        c.output = "{stem}.tc.mov"
+        self.assertEqual(c.output_name("/a/take.mov"), "take.tc.mov")
+        c.output = "{name}.meta"
+        self.assertEqual(c.output_name("/a/take.mov"), "take.mov.meta")
+        c.output = "{stem}_{ext}.mp4"
+        self.assertEqual(c.output_name("take.MOV"), "take_MOV.mp4")
+        self.assertEqual(c.problems(), [])
+
+    def test_bad_output_and_version(self):
+        for output, words in (("{stem}.{bogus}", "unknown"), ("sub/{stem}.x", "file name"),
+                              ("same.mp4", "{stem} or {name}")):
+            c = mp4()
+            c.output = output
+            self.assertTrue(any(words in p for p in c.problems()), (output, c.problems()))
+        for version in (0, "2", 1.5, True):
+            c = mp4()
+            c.version = version
+            self.assertIn("version must be a whole number, 1 or more", c.problems())
+
+    def test_describe_is_plain_data(self):
+        c = mp4()
+        c.inputs = ("MOV", ".mkv")
+        c.version = 3
+        d = c.describe()
+        self.assertEqual(d["inputs"], ["mkv", "mov"])
+        self.assertEqual((d["output"], d["version"]), ("{stem}.mp4", 3))
+        self.assertFalse(d["python_accepts"] or d["python_output"])
+        json.dumps(d)                                    # nothing but JSON values
+
+        class Picky(Conversion):
+            def accepts(self, path):
+                return True
+        self.assertTrue(Picky().describe()["python_accepts"])
+
+    def test_shipped_meta_conversions_name_by_data(self):
+        r = conv_mod.registry               # the .py conversions @register into this one
+        r.load_all()
+        self.assertEqual(r.problems, [])
+        for d in r.describe():
+            self.assertFalse(d["python_accepts"] or d["python_output"], d["id"])
+        meta = r.get("media.meta")
+        self.assertEqual(meta.output_name("/x/clip.mov"), "clip.mov.meta")
+
 
 class LoadingTests(unittest.TestCase):
     def setUp(self):
@@ -153,6 +199,16 @@ class LoadingTests(unittest.TestCase):
         r = self.load()
         self.assertEqual([c.id for c in r.all()], ["ok"])
         self.assertEqual(len(r.problems), 3)
+
+    def test_json_output_and_version(self):
+        self.write("v.json", """[{"id":"v","label":"V","group":"G","output_ext":"mov","output":"{stem}.tc.mov",
+                                  "version":2,"command":["{input}","{output}"]},
+                                 {"id":"n","label":"N","group":"G","output_ext":"x","output":5,"command":["{input}","{output}"]}]""")
+        r = self.load()
+        v = r.get("v")
+        self.assertEqual((v.version, v.output_name("a.mov")), (2, "a.tc.mov"))
+        self.assertIsNone(r.get("n"))
+        self.assertEqual(len(r.problems), 1)
 
     def test_python_file_registers_with_decorator(self):
         self.write("mine.py", """
