@@ -83,6 +83,14 @@ def manifest():
     return merged
 
 
+def host_path(name):
+    """The app's own copy, when it says which (PEEL_TOOL_FFMPEG=<path>, the name upper
+    case with - as _): an app that ships or finds its tools itself sets it for the
+    operations it runs, ahead of the user's settings.json."""
+    value = os.environ.get("PEEL_TOOL_" + name.upper().replace("-", "_"))
+    return value if value and os.path.isfile(value) else None
+
+
 def configured_path(name):
     value = _read_json(user_data_dir() / "settings.json").get("tools", {}).get(name)
     return value if value and os.path.isfile(value) else None
@@ -106,6 +114,9 @@ def find(name):
     """Full path to the tool, or None.  BUILTIN is reported as the interpreter."""
     if name == BUILTIN:
         return sys.executable or BUILTIN
+    path = host_path(name)
+    if path:
+        return path
     path = configured_path(name)
     if path:
         return path

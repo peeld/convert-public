@@ -140,6 +140,8 @@ All paths are relative to this repository's root.
 | `convert/__init__.py` | Re-exports `Conversion`, `Job`, `register`, `registry`, `user_dir`. Only imports `conversion`, so conversion files can `from convert import ...` without PeelCore. | no |
 | `convert/conversion.py` | `Conversion` base class, `Job`, the `ConversionRegistry` (JSON and `.py` loading), folder locations. | no |
 | `convert/conversions/*.json` | Shipped conversion definitions (`ffmpeg.json` today). Any `.py` here is loaded too. | — |
+| `convert/conversions/timecode_ops.py` | Burn In Timecode and Export WAV (Broadcast WAV): `runs_itself` conversions that keep the video's timecode, using `values` from the app or ffprobe. | no |
+| `convert/timecode.py` | SMPTE timecode text ↔ frames at an exact rate (drop frame included), the Python mirror of core's `TCValue` rules. | no |
 | `convert/paths.py` | Output-directory rules and the temp-file name. Pure functions, testable with `ntpath`/`posixpath`. | no |
 | `convert/tools.py` + `tools.json` | Find a tool's executable; download, verify (SHA-256) and unpack it. | no |
 | `convert/host.py` | What the running app says: `app_name()`, `user_data_dir()`, `api()`. The only place that asks `_peelhost`. | no |
@@ -190,6 +192,19 @@ name, not a path: the app chooses the folder. `{stem}` is the name without its
 last extension (`a.tar.gz` → `a.tar`), `{name}` the whole name, `{ext}` the
 extension without the dot as written.
 
+**Values the app knows.** `values` (a tuple of names from `conversion.VALUES`:
+`tc_start`, `tc_rate`, `video_rate`) lists facts about the file the conversion
+uses and the app may already have, so it needn't probe again (PeelPost's day
+scan reads every video's timecode). `describe()` lists them; the app passes what
+it has to `run_conversion(..., values=)`, which gives the conversion only the
+names it declares, and none that are empty, in `job.values`. A conversion must
+run without them: it finds what's missing itself (the timecode operations call
+`timecode_ops.file_values()`, which uses ffprobe). An app that keeps runs puts
+the values it passed in its request, so a run counts as stale when they change.
+A `run()` puts what the app should keep about the run (the timecode it used,
+warnings) in `job.details`; `run_conversion(..., details={})` hands that dict in.
+Adding a name to `VALUES` is a host API change (§1.3).
+
 `Job` is what `build_command` receives:
 
 ```python
@@ -198,6 +213,8 @@ class Job:
     input: str        # full path of the source file
     output: str       # full path of the TEMP file to write (see 2.3), not the final name
     tool_path: str    # full path of the tool's executable
+    values: dict      # what the app knows about the file (only declared names)
+    details: dict     # run() fills it: what the app keeps about the run
 ```
 
 `problems()` requires `id`, `label`, a non-blank `group`, `tool`, `output_ext` (or an
@@ -308,6 +325,9 @@ Life of one ConvertOp:
 
 `tools.find(name)` returns the executable path or `None`, trying in order:
 
+0. `PEEL_TOOL_<NAME>` in the environment (upper case, `-` as `_`): the app's own
+   copy, when it ships or finds its tools itself (PeelPost sets `PEEL_TOOL_FFMPEG`
+   and `PEEL_TOOL_FFPROBE` for its workers). Ignored if the file isn't there.
 1. `%APPDATA%\<app>\settings.json` → `{"tools": {"<name>": "C:/path/to/exe"}}`
 2. `%APPDATA%\<app>\tools\<name>\**\<exe>` (where downloads are unpacked)
 3. `PATH` (`shutil.which`)

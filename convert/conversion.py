@@ -36,6 +36,12 @@ writes changes, so an app that keeps past runs knows they are out of date.
 Which files and what name are data (`inputs`, `output`) so an app can match many files
 without calling Python for each; registry.describe() gives them as plain values.
 
+`values` names facts about the file the conversion uses and the app may already know
+(VALUES below: the start timecode and rates).  The app passes the ones it has in
+Job.values; a conversion finds any missing one itself (convert.probe), so it runs the
+same with or without them.  A `run()` can put what the app should keep about the run
+(the timecode it used, warnings) in Job.details.
+
 Python:
 
     from convert import Conversion, register
@@ -61,11 +67,17 @@ import importlib.util
 import json
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 JSON_FIELDS = ("id", "label", "group", "tool", "inputs", "output_ext", "output", "version",
-               "command", "args", "class")
+               "values", "command", "args", "class")
+# What an app may know about a file and pass in Job.values (all strings):
+VALUES = {
+    "tc_start": "the start timecode, HH:MM:SS:FF (';' before FF for drop frame)",
+    "tc_rate": "the exact rate the timecode counts at, e.g. 30000/1001",
+    "video_rate": "the video's exact frame rate, e.g. 30000/1001",
+}
 OUTPUT_TOKENS = ("{stem}", "{name}", "{ext}")
 
 
@@ -75,10 +87,14 @@ class ConversionError(Exception):
 
 @dataclass
 class Job:
-    """What build_command() is given.  `output` is the temporary file ffmpeg writes."""
+    """What build_command() and run() are given.  `output` is the temporary file to
+    write.  `values`: what the app knows about the file (VALUES; only names the
+    conversion declares).  `details`: filled by run() for the app's record of the run."""
     input: str
     output: str
     tool_path: str = ""
+    values: dict = field(default_factory=dict)
+    details: dict = field(default_factory=dict)
 
 
 class Conversion:
@@ -90,6 +106,7 @@ class Conversion:
     output_ext = ""
     output = ""          # name template ({stem}, {name}, {ext}); "" = "{stem}.<output_ext>"
     version = 1          # bump when what it writes changes
+    values = ()          # names from VALUES the app may pass in Job.values
     command = ()         # tool arguments with {input} and {output}
     args = None          # reserved: arguments the user will be able to set
     runs_itself = False  # True: ConvertOp calls run() instead of launching the tool with `command`
@@ -117,6 +134,7 @@ class Conversion:
             "id": self.id, "label": self.label, "group": self.group, "tool": self.tool,
             "version": self.version,
             "inputs": sorted({e.lower().lstrip(".") for e in self.inputs}),
+            "values": list(self.values),
             "output": self.output_template(),
             "python_accepts": cls.accepts is not Conversion.accepts,
             "python_output": cls.output_name is not Conversion.output_name,
@@ -161,6 +179,9 @@ class Conversion:
                 out.append("output is a file name, not a path: " + self.output)
             if "{stem}" not in self.output and "{name}" not in self.output:
                 out.append("output needs {stem} or {name}, or every input writes the same file")
+        unknown = [v for v in self.values if v not in VALUES]
+        if unknown:
+            out.append("unknown values: " + ", ".join(map(str, unknown)))
         if isinstance(self.version, bool) or not isinstance(self.version, int) or self.version < 1:
             out.append("version must be a whole number, 1 or more")
         if self.runs_itself:
@@ -268,7 +289,7 @@ class ConversionRegistry:
         if "output" in entry and not isinstance(entry["output"], str):
             self.problems.append("%s: output must be a string" % label)
             return
-        for field in ("inputs", "command"):
+        for field in ("inputs", "command", "values"):
             value = entry.get(field)
             if value is not None and not (isinstance(value, list) and all(isinstance(v, str) for v in value)):
                 self.problems.append("%s: %s must be a list of strings" % (label, field))
@@ -287,7 +308,7 @@ class ConversionRegistry:
         for field in JSON_FIELDS:
             if field in entry and field != "class":
                 value = entry[field]
-                setattr(conv, field, tuple(value) if field in ("inputs", "command") else value)
+                setattr(conv, field, tuple(value) if field in ("inputs", "command", "values") else value)
         self.register(conv, label)
 
     @staticmethod

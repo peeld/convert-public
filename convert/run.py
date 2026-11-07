@@ -1,7 +1,7 @@
 """Running one conversion on one file, with no work framework around it.
 
     run_conversion(conversion, source, output, tool_path, log=..., progress=..., status=...,
-                   cancel=threading.Event(), on_process=...) -> output
+                   cancel=threading.Event(), on_process=..., values=None, details=None) -> output
 
 It writes a temporary file beside `output` (paths.temp_name), renames it to `output`
 when the tool succeeded, and removes it otherwise.  ConvertOp (ops.py) runs it on a
@@ -13,6 +13,10 @@ Callbacks (each optional, called from the calling thread or a reader thread):
     progress(fraction)    0.0 to 1.0
     status(text)          a short line for a UI
     on_process(proc)      every child process, so a canceller can terminate() it
+
+values: what the caller knows about the file (conversion.VALUES), given to the conversion
+in Job.values (only the names it declares).  details: a dict the conversion's run() fills
+with what to keep about the run (Job.details).
 
 Outcome: returns `output`; raises Cancelled when `cancel` was set (nothing written),
 ConversionError with a message for the user when it failed (nothing written).
@@ -41,10 +45,12 @@ def _none(*_):
 
 
 def run_conversion(conversion, source, output, tool_path, log=None, progress=None, status=None,
-                   cancel=None, on_process=None):
+                   cancel=None, on_process=None, values=None, details=None):
     log, progress, status, on_process = log or _none, progress or _none, status or _none, on_process or _none
     cancel = cancel or threading.Event()
-    job = Job(input=source, output=paths.temp_name(output), tool_path=tool_path)
+    given = {k: v for k, v in (values or {}).items() if k in conversion.values and v not in (None, "")}
+    job = Job(input=source, output=paths.temp_name(output), tool_path=tool_path,
+              values=given, details=details if details is not None else {})
     try:
         os.makedirs(os.path.dirname(job.output), exist_ok=True)
         if conversion.runs_itself:
