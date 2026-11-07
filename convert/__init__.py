@@ -8,8 +8,8 @@ This package knows about conversions and tools, and works in any app:
     paths       output-path rules (pure functions, no Qt, no PeelCore)
     tools       finding and downloading ffmpeg and other tools
     run         one conversion on one file, with callbacks (no Qt, no PeelCore)
-    runner      how many child processes run at once
-    ops         ConvertOp and InstallToolOp (work::Op subclasses; need PeelCore)
+    ops         ConvertOp and InstallToolOp (work::Op subclasses; need PeelCore), and
+                how many of each run at once (apply_limits)
     update_*    self-update from signed releases (update_ui needs PySide6)
     check       `python -m convert.check` validates every conversion definition
 

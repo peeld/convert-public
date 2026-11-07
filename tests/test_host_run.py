@@ -36,7 +36,7 @@ class HostTests(unittest.TestCase):
 
     def test_the_app_names_itself(self):
         self.assertEqual(host.app_name(), _peelhost.APP_NAME)
-        self.assertEqual(host.api(), 2)
+        self.assertEqual(host.api(), 3)
         self.assertEqual(host.user_data_dir(), Path(self.tmp.name) / _peelhost.APP_NAME)
 
     def test_the_app_can_give_its_folder(self):

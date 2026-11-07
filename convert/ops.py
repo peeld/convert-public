@@ -5,6 +5,9 @@ once and a worker thread calls complete(), fail() or acknowledgeCancel().
 
 Both report progress (setProgress, 0.0 to 1.0) and a status line (setStatus) for the UI.
 
+How many run at once is the queue's job: apply_limits(executor) sets core's per-type
+limit (Executor.setLimit, host API 3).  A ConvertOp waiting for its turn stays READY.
+
 Properties of a ConvertOp (all strings):
     conversion   id of a registered Conversion
     input        full path of the source file
@@ -17,7 +20,7 @@ import threading
 
 from PeelCore import work
 
-from . import paths, runner, tools
+from . import paths, tools
 from .conversion import ConversionError, registry
 from .run import Cancelled, run_conversion
 
@@ -25,6 +28,19 @@ CONVERT_TYPE = "convert.job"
 INSTALL_TYPE = "tool.install"
 
 _DOWNLOADED = re.compile(r"downloaded (\d+)%")
+
+# Most Ops of each type RUNNING at once.  ffmpeg already uses every core, so one
+# conversion at a time; tool downloads are not limited.
+LIMITS = {CONVERT_TYPE: 1}
+
+
+def apply_limits(executor, limits=None):
+    """Give a work executor (core's StepExecutor) the limits: LIMITS, updated by `limits`
+    ({type name: count}, 0 = no limit)."""
+    wanted = dict(LIMITS)
+    wanted.update(limits or {})
+    for type_name, count in wanted.items():
+        executor.setLimit(type_name, int(count))
 
 
 def _prop(op, name, default=""):
@@ -93,19 +109,13 @@ class ConvertOp(work.Op):
         self.log(work.LogStream.Stderr if stream == "stderr" else work.LogStream.Stdout, text)
 
     def _run(self, conversion, source, output, exe):
-        """Worker thread: wait for a slot, then run.run_conversion() with the Op as its callbacks."""
+        """Worker thread: run.run_conversion() with the Op as its callbacks."""
         try:
-            self.log(work.LogStream.Stdout, "waiting for a free slot")
-            self.setStatus("Waiting for a free slot")
-            if not runner.acquire(self._cancel):
-                self.acknowledgeCancel()
-                return
             try:
                 written = run_conversion(conversion, source, output, exe, log=self._log,
                                          progress=self.setProgress, status=self.setStatus,
                                          cancel=self._cancel, on_process=self._track)
             finally:
-                runner.release()
                 self._track(None)
             out = work.Params()
             out.set("output", written)

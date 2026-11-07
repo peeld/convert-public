@@ -346,7 +346,6 @@ class OpTests(OpTestBase):
         self.run_op(op)
         self.assertEqual(op.progress(), 1.0)
         self.assertEqual(op.status(), "Done")
-        self.assertIn("Waiting for a free slot", op.status_history)
         self.assertIn("Converting: 50%", op.status_history)
 
     def test_failure_leaves_no_file(self):
@@ -397,20 +396,21 @@ class OpTests(OpTestBase):
         finally:
             tools.shutil.which = orig
 
-    def test_slots_run_one_at_a_time(self):
-        from convert import runner
-        import threading
-        cancel = threading.Event()
-        self.assertTrue(runner.acquire(cancel))
-        got = []
-        t = threading.Thread(target=lambda: got.append(runner.acquire(cancel)))
-        t.start()
-        t.join(0.4)
-        self.assertTrue(t.is_alive(), "second acquire should wait for the slot")
-        cancel.set()
-        t.join(2)
-        self.assertEqual(got, [False])
-        runner.release()
+    def test_apply_limits(self):
+        from convert import ops
+
+        class Executor:                     # records what core's StepExecutor would be told
+            def __init__(self):
+                self.limits = {}
+
+            def setLimit(self, type_name, count):
+                self.limits[type_name] = count
+
+        ex = Executor()
+        ops.apply_limits(ex)
+        self.assertEqual(ex.limits, {ops.CONVERT_TYPE: 1})      # one conversion at a time
+        ops.apply_limits(ex, {ops.CONVERT_TYPE: 3, ops.INSTALL_TYPE: 1})
+        self.assertEqual(ex.limits, {ops.CONVERT_TYPE: 3, ops.INSTALL_TYPE: 1})
 
 
 class ToolTests(unittest.TestCase):

@@ -1,5 +1,5 @@
 """A stand-in for the `_peelhost` module the app's exe builds in (core's
-pythonhost/pythonHost.cpp), host API 2.  The app's name is deliberately not a real
+pythonhost/pythonHost.cpp), host API 3.  The app's name is deliberately not a real
 app's: convert-public must not depend on which app runs it.  No user_data_dir():
 convert.host then uses the same APPDATA rule as the exe, which the tests point at
 a temporary folder."""
@@ -10,7 +10,7 @@ APP_NAME = "TestApp"
 
 
 def host_api():
-    return 2
+    return 3
 
 
 def app_name():

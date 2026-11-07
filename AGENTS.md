@@ -114,9 +114,10 @@ outside the app, which is why the tests use a fake PeelCore (§7).
 
 What this repo may ask of the app is the **host API**. Its level is in
 `manifest.json` (`host_api` {min, max}); an app only loads a downloaded copy
-whose range contains the app's level. Level 2 is:
+whose range contains the app's level. Level 3 is:
 
-- `PeelCore` (`work.Op`, `Params`, `Pipeline`, ...), and
+- `PeelCore` (`work.Op`, `Params`, `Pipeline`, `StepExecutor` with
+  `setLimit(type, n)` / `limit(type)`, ...), and
 - `_peelhost`: `host_api()`, `app_name()`, `user_data_dir()`, `can_verify()`,
   `verify(data, signature)`, `source()`, `exe_path()`, `bundled_dir()`.
 
@@ -125,7 +126,8 @@ An app's own module (`convertapp`) is not part of the host API: code here must n
 import it. Needing something new from the app means a new level, a new installer,
 and the fake in `tests/fakecore/` extended to match. Level 1 (PeelConvert before
 2026-11) had no `app_name()` / `user_data_dir()` and expected `convert_startup.py`
-in this repo.
+in this repo. Level 2 had no `Executor.setLimit()`: `runner.py` limited
+conversions itself.
 
 ---
 
@@ -140,14 +142,13 @@ All paths are relative to this repository's root.
 | `convert/conversions/*.json` | Shipped conversion definitions (`ffmpeg.json` today). Any `.py` here is loaded too. | — |
 | `convert/paths.py` | Output-directory rules and the temp-file name. Pure functions, testable with `ntpath`/`posixpath`. | no |
 | `convert/tools.py` + `tools.json` | Find a tool's executable; download, verify (SHA-256) and unpack it. | no |
-| `convert/runner.py` | Global slot limit: how many conversion processes run at once (default 1). | no |
 | `convert/host.py` | What the running app says: `app_name()`, `user_data_dir()`, `api()`. The only place that asks `_peelhost`. | no |
 | `convert/run.py` | `run_conversion(...)`: one conversion on one file with log/progress/status callbacks and a cancel event; temp file, rename, cleanup. Runs anywhere (an Op, a worker process, a script). | no |
 | `convert/ops.py` | `ConvertOp` and `InstallToolOp`, the `work.Op` subclasses; `ConvertOp` runs `run_conversion()` on a worker thread. | yes |
 | `convert/check.py`, `__main__.py` | `python -m convert.check [--app NAME] [folder ...]`: load and validate definitions, exit 1 on problems. | no |
 | `tests/test_*.py`, `tests/fakecore/` | Unit tests, with Python fakes of `PeelCore.work` and `_peelhost` (app name `TestApp`). | fake |
 
-Keep that import boundary: **`conversion`, `paths`, `tools`, `runner`, `host`, `run` must
+Keep that import boundary: **`conversion`, `paths`, `tools`, `host`, `run` must
 never import PeelCore, Qt or an app's module (`convertapp`), and nothing here may
 name an app.** That is what lets `convert.check` and most
 tests run with a plain Python.
@@ -263,8 +264,7 @@ Life of one ConvertOp:
    goes idle (a tool may have just been installed).
 3. **`start(inputs, upstream)`** runs on the **Qt main thread with the GIL held**.
    It must return at once: it starts a daemon thread.
-4. **Worker thread (`_run`)**: waits for a slot in `runner` (status
-   "Waiting for a free slot"; cancellable), then calls
+4. **Worker thread (`_run`)**: calls
    `run.run_conversion(conversion, input, output, tool_path, log=, progress=, status=,
    cancel=, on_process=)` with the Op's own methods as the callbacks. It writes
    `paths.temp_name(output)` (`a.mp4` → `a.converting.mp4`, keeping the extension so
@@ -336,13 +336,16 @@ The Controller is generic over tool names: on start-up and on the Install
 button it queues an `InstallToolOp` for every tool that some registered
 conversion uses, that `find()` cannot locate, and that has a valid download.
 
-### 2.5 Concurrency (`runner.py`)
+### 2.5 Concurrency (`ops.apply_limits`)
 
-Every ConvertOp is independent (no Pipeline edges), so the executor starts all
-READY Ops at once; each then blocks in `runner.acquire()` until a slot is free.
-`runner.set_slots(n)` changes the limit (default 1, because ffmpeg uses every
-core). The slot pool is shared by **all** conversions regardless of tool. Do not
-serialise Ops with edges instead: one failure would mark every later Op Dead.
+Every ConvertOp is independent (no Pipeline edges). How many run at once is the
+queue's job: the app calls `ops.apply_limits(executor)` once, which sets core's
+per-type limit (`StepExecutor.setLimit(type, n)`, host API 3) from `ops.LIMITS`:
+one `convert.job` at a time (ffmpeg uses every core), tool downloads unlimited.
+An Op waiting for its turn stays READY (the queue shows it waiting) and cancels
+at once. The limit is per Op type, shared by **all** conversions regardless of
+tool. Do not serialise Ops with edges instead: one failure would mark every later
+Op Dead.
 
 ---
 
@@ -497,7 +500,7 @@ definitions will work.
 
 Everything else is already tool-agnostic: `Conversion.tool`, `tools.find`,
 `tools.json`, `InstallToolOp`, the Controller's missing-tool notice and Install
-button, validation ("<tool> is not installed"), the slot runner.
+button, validation ("<tool> is not installed"), the per-type limit (`ops.LIMITS`).
 
 ### 5.2 Refactor to make (once)
 
@@ -550,8 +553,9 @@ unchanged:
 3. **Progress**: if the tool prints progress, subclass `Conversion`, override
    `parse_stdout`/`parse_stderr`, and point the JSON `class` at it. Without
    progress the bar stays empty and the status reads "Converting" until done.
-4. **Concurrency**: if the tool is single-threaded, more slots may help, but the
-   pool is global; changing `runner` to per-tool pools is a separate change.
+4. **Concurrency**: if the tool is single-threaded, more at once may help, but the
+   limit is per Op type (`ops.LIMITS`), not per tool; a per-tool limit needs its
+   own Op type or a core change.
 5. Check: `python -m convert.check`, the unit tests, then the app with the tool
    (a) on PATH, (b) set in settings.json, (c) missing — the notice should say so
    and offer Install only if a download is defined.
@@ -673,7 +677,7 @@ python build.py stage && python build.py run --staged -- --python-check   # what
 - [ ] `python -m convert.check` prints no `PROBLEM:` lines.
 - [ ] New shipped tool downloads have a checksum and a `note` with the licence.
 - [ ] Codecs/features used exist in the build the app downloads (LGPL ffmpeg: no x264/x265).
-- [ ] No PeelCore/Qt import added to `conversion`, `paths`, `tools`, `runner`.
+- [ ] No PeelCore/Qt import added to `conversion`, `paths`, `tools`, `run`, `host`.
 - [ ] Every new Op path ends in `complete`, `fail` or `acknowledgeCancel`, and removes temp output.
 - [ ] C++ touched only for new UI capability; `bindings.xml`/`CMakeLists.txt` updated together.
 - [ ] `--python-check` passes on a built app if C++ or startup code changed.
