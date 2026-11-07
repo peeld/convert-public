@@ -21,6 +21,7 @@
     "convert/update_service.py": "d6c60bb093255a6e7d5a74c3180c6f8f86013666c916a666d2b39d2ce23c7533",
     "convert/update_ui.py": "57b083a72d8a879beb160ef9f481718faa55dc8d39fee935a18c91a9ff11c934",
     "convert/updater.py": "4f1d5ce63aadcddcca427f7e3a553bdd9f049fb9f507d96dd387dad86a665714",
+    "convert/user_startup.py": "126929b0e00a75f1c6fa9c76d38da599ac84cbbb9e2e7d550b375d02ac12aead",
     "manifest.json": "7b737e892745dd6788447ac40e7bd3f076c3cd3165bfc931af03b85ae4f0d306"
   },
   "host_api": {

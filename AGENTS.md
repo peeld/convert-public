@@ -142,6 +142,7 @@ All paths are relative to this repository's root.
 | `convert/conversions/*.json` | Shipped conversion definitions (`ffmpeg.json` today). Any `.py` here is loaded too. | — |
 | `convert/conversions/timecode_ops.py` | Burn In Timecode and Export WAV (Broadcast WAV): `runs_itself` conversions that keep the video's timecode, using `values` from the app or ffprobe. | no |
 | `convert/timecode.py` | SMPTE timecode text ↔ frames at an exact rate (drop frame included), the Python mirror of core's `TCValue` rules. | no |
+| `convert/user_startup.py` | `run(window)`: the user's own start-up code, every `<user data>/userPython/startup/*.py` in name order, each `install(window)` called; failures reported and skipped. An app calls it once its window is up. | no |
 | `convert/paths.py` | Output-directory rules and the temp-file name. Pure functions, testable with `ntpath`/`posixpath`. | no |
 | `convert/tools.py` + `tools.json` | Find a tool's executable; download, verify (SHA-256) and unpack it. | no |
 | `convert/host.py` | What the running app says: `app_name()`, `user_data_dir()`, `api()`. The only place that asks `_peelhost`. | no |

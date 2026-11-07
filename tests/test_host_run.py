@@ -146,3 +146,27 @@ class RunTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UserStartupTests(unittest.TestCase):
+    def test_runs_install_in_name_order_and_skips_failures(self):
+        import tempfile
+        from pathlib import Path
+        from convert import user_startup
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            (folder / "b_second.py").write_text("def install(window):\n    window.append('b')\n")
+            (folder / "a_first.py").write_text("def install(window):\n    window.append('a')\n")
+            (folder / "c_broken.py").write_text("raise RuntimeError('nope')\n")
+            (folder / "d_no_install.py").write_text("X = 1\n")
+            window = []
+            loaded, problems = user_startup.run(window, folder)
+        self.assertEqual(window, ["a", "b"])
+        self.assertEqual(loaded, ["a_first.py", "b_second.py", "d_no_install.py"])
+        self.assertEqual(len(problems), 1)
+        self.assertIn("c_broken.py: RuntimeError: nope", problems[0])
+
+    def test_no_folder_is_nothing(self):
+        from pathlib import Path
+        from convert import user_startup
+        self.assertEqual(user_startup.run(None, Path("/no/such/folder")), ([], []))
