@@ -1,0 +1,30 @@
+turn any video into a small animated GIF
+convert my phone videos (mov) to mp4 that plays everywhere
+extract the audio from a video as mp3
+make a short silent version of a video
+shrink a video so it is under 25 MB for email
+turn a wav file into a small opus file for voice notes
+make a square 1080 version of a video with a blurred background
+cut a video down to its first 30 seconds
+speed a video up to 2x
+rotate a sideways phone video
+make a contact sheet image from a video
+convert a flac to 192k mp3
+normalise the loudness of an audio file
+turn a png into a webp
+make a gif from a video at 12 fps, 480 wide
+extract the first frame of a video as a jpeg
+join the audio of a video with a still image to make a video
+reverse a short clip
+make an audio file mono
+remove the audio from a video
+convert a video to webm with vp9
+make a ringtone from a song, 30 seconds with fade out
+upscale a small image to double size
+convert a video to h264 mp4
+turn a video into a slideshow of one frame per second
+make the video black and white
+add a fade in and out to a video
+change the frame rate of a video to 24
+convert a 4k video to 720p
+make a podcast-friendly mono 64k mp3

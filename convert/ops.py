@@ -20,7 +20,7 @@ import threading
 from PeelCore import work
 
 from . import paths, runner, tools
-from .conversion import ConversionError, Job, registry
+from .conversion import TOOL_FLAGS, ConversionError, Job, registry
 
 CONVERT_TYPE = "convert.job"
 INSTALL_TYPE = "tool.install"
@@ -121,7 +121,7 @@ class ConvertOp(work.Op):
 
     def _execute(self, conversion, job):
         os.makedirs(os.path.dirname(job.output), exist_ok=True)
-        argv = [job.tool_path, "-nostdin", "-hide_banner", "-nostats", "-progress", "pipe:1", "-y"]
+        argv = [job.tool_path, *TOOL_FLAGS]
         argv += conversion.build_command(job)
         self.log(work.LogStream.Stdout, "run: " + " ".join(argv))
         self.setStatus("Converting")

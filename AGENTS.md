@@ -116,6 +116,18 @@ All paths are relative to this repository's root.
 | `convert/ops.py` | `ConvertOp` and `InstallToolOp`, the `work.Op` subclasses that do the work. | yes |
 | `convert/app.py` | `Controller`: wires the panel's signals to the registry, paths, tools and Ops. | yes |
 | `convert/check.py`, `__main__.py` | `python -m convert.check [folder ...]`: load and validate definitions, exit 1 on problems. | no |
+| `convert/mcp_server.py` | MCP protocol (JSON-RPC), HTTP on 127.0.0.1 and stdio. Standard library only. | no |
+| `convert/mcp_tools.py` | The tools an AI agent can call (guide, list, validate, test, save, delete) and the limits on them. | no |
+| `convert/trial.py` | Generates a sample file and runs a conversion on it in a temp folder (used by `test_conversion`). | no |
+| `convert/agent_guide.py` | The text an agent reads: server instructions and the authoring guide. | no |
+| `convert/agent_service.py` | On/off setting, port and secret link (`agent.json`), and the per-app connect snippets. | no |
+| `convert/agent_loop.py` | "Describe a conversion" agent loop (no Qt): `Session.send`, events, 12-round cap, only read/test tools + `propose_conversion`. | no |
+| `convert/agent_model.py` | Anthropic Messages API client (urllib, prompt caching, retries, friendly errors). | no |
+| `convert/describe_settings.py` | The person's API key (DPAPI-encrypted `describe.key`) and model name (`describe.json`). | no |
+| `convert/describe_ui.py` | The describe window: key setup, request box, progress, review card with Add/Discard. | no |
+| `convert/cloud_auth.py` | Reads the license file (DPAPI) and signs requests with the machine secret. The only file that touches the secret. | no |
+| `convert/cloud_client.py` | Cloud API client: sign in, short-lived token cache, `me`, `status`, friendly errors. | no |
+| `convert/agent_ui.py` | The "Connect an AI agent" window, the AI menu, the Connect AI button, the folder watcher. | no (PySide6) |
 | `tests/test_convert.py`, `tests/fakecore/` | Unit tests, with a Python fake of `PeelCore.work`. | fake |
 
 Keep that import boundary: **`conversion`, `paths`, `tools`, `runner` must never
@@ -644,3 +656,65 @@ python build.py stage && python build.py run --staged -- --python-check   # what
 - [ ] C++ touched only for new UI capability; `bindings.xml`/`CMakeLists.txt` updated together.
 - [ ] `--python-check` passes on a built app if C++ or startup code changed.
 - [ ] Docstrings at the top of changed modules still describe them (they are the reference docs).
+
+---
+
+## 9. AI agents writing personal conversions (MCP)
+
+The app can run a small MCP server so a person's own AI app (Claude Code, Cursor, ...) can write
+conversions for them. It is off until the person turns it on in **AI > Connect an AI agent...**
+(or the **Connect AI...** button next to Reload), which also shows the text to paste into each AI app.
+
+- **Transport:** Streamable HTTP on `127.0.0.1` only, URL `http://127.0.0.1:<port>/mcp/<secret>`.
+  The secret and port live in `%APPDATA%\PeelConvert\agent.json`. Host and Origin are checked, so a web
+  page in the person's browser cannot talk to it. Without the app: `python -m convert.mcp_server`
+  speaks stdio (same tools).
+- **Tools:** `get_authoring_guide`, `list_conversions`, `get_conversion`, `list_tools`,
+  `tool_capabilities`, `validate_conversion`, `test_conversion`, `save_conversion`, `delete_conversion`.
+- **What an agent may do** is enforced in `mcp_tools.py`, not in the prompt: JSON definitions only (no
+  `class`, no `.py`), only tools in `tools.json` that are not `bundled_with` another, no `-y`/`-progress`
+  style flags, no absolute or `..` paths in `command`, never replace a built-in id or one the person
+  wrote by hand. `test_conversion` runs on a generated sample (or a given file, read only) in a temp
+  folder.
+- **Where files go:** `%APPDATA%\PeelConvert\userPython\conversions\ai.<id>.json`, one file per
+  conversion, on that person's computer only. They are personal: nothing here assumes they are
+  committed, pushed or contributed. The app polls the folder every 2 seconds and reloads when it
+  changes, so a saved conversion shows up without pressing Reload.
+- **Changing the tools or the guide:** edit `mcp_tools.py` / `agent_guide.py`. If a conversion rule
+  changes (a new forbidden flag, a new allowed field) change it in `check_definition` and in
+  `GUIDE` together, and add a case to `tests/test_mcp.py`.
+- **Tests:** `tests/test_mcp.py` uses a fake ffmpeg and needs no app. The Qt window is not unit
+  tested; check it by hand (AI menu, turn on, copy a snippet, save a conversion from an agent).
+
+
+## 10. Describe a conversion (in-app agent, user's own API key)
+
+The person types what they want; `agent_loop.Session` runs a model (`agent_model.AnthropicModel`)
+with `mcp_tools.AGENT_TOOLS`. That list is the read/test tools plus `propose_conversion`; it has no
+save or delete, so only the Add button in `describe_ui.py` writes a file (via `save_conversion`,
+which re-checks everything). `propose_conversion` refuses a definition that has not passed
+`test_conversion` this session. `input_path` is stripped from tool arguments so the model cannot read
+the person's files. The system prompt is `agent_guide.DESCRIBE_RULES`.
+
+- Events from the loop: status, message, question, proposal, error, done. The UI receives them on a
+  Qt Signal from the worker thread; never touch widgets from the thread.
+- The key is stored with DPAPI (Windows) in `describe.key`; the model name is editable because
+  model names change (`describe_settings.DEFAULT_MODEL`).
+- `describe-usage.jsonl` records token counts per request, never the text.
+- Tests: `tests/test_describe.py` (scripted fake model, local fake HTTP server). Real-model quality
+  is measured with `tools/measure_describe.py` and `tools/describe_prompts.txt` (needs a key).
+- To add another provider, write a class with `complete(system, messages, tools, cancel)` returning
+  `agent_model.Reply`; the loop does not change.
+
+
+## 11. Cloud sign-in (phase 2)
+
+`cloud_auth.load_credentials()` decrypts `%LOCALAPPDATA%\PeelConvert\license.dat` (the C++ license store: JSON
+`product_slug`, `machine_secret`, `offline_jwt`). The machine id hash comes from the offline JWT's `machine` claim, so
+nothing is measured again. `cloud_client.CloudClient.sign_in()` POSTs to `/api/licensing/cloud-token/` with HMAC headers
+(same message as machine-checkin, without the NIC list) and gets a 15 minute token; `token()` renews it a minute
+before expiry. Tokens stay in memory. The Connect window has a "Cloud account" row that runs a sign-in check on a worker thread.
+
+Server side lives in the `web` project: `licensing/cloud_token.py` (token + JWKS endpoints, `ProductEntitlement` model) and
+the new `cloud` module (`/api/cloud/v1/status`, `/me`). Set `PEELCONVERT_CLOUD_URL` to point the app at a dev server.
+Tests: `tests/test_cloud.py` (fake server). The real client was also run once against the real Django server.

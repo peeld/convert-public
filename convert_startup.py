@@ -18,6 +18,7 @@ from PySide6.QtWidgets import QMainWindow, QMessageBox
 
 _controller = None      # keeps the signal connections alive
 _updates = None         # the update service (convert/update_service.py)
+_agent = None           # the AI connection: menu, window, server (convert/agent_ui.py)
 
 
 def main_window():
@@ -33,9 +34,11 @@ def install():
     menu = win.menuBar().addMenu("&Python")
     menu.addAction("About Python...").triggered.connect(
         lambda: QMessageBox.information(win, "Python", report()))
-    global _updates
+    global _updates, _agent
     from convert.update_ui import install_update_service
     _updates = install_update_service(win, _controller)
+    from convert.agent_ui import install_agent_ui
+    _agent = install_agent_ui(win, _controller)
 
 
 def loaded_dlls():

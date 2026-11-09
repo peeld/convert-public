@@ -13,3 +13,9 @@ bundled copy and can fetch newer signed releases of this repo.
       python -m unittest discover -s tests
 
 Personal-only operations belong in the app's userPython folder, not here.
+
+## AI-written conversions
+
+**AI > Connect an AI agent...** turns on a local MCP server and shows what to paste into Claude Code,
+Cursor, VS Code, Claude Desktop or Codex so the AI can write, test and save conversions for you. They
+are saved in your own `userPython` folder and stay on your computer. See `AGENTS.md` section 9.

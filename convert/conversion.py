@@ -51,6 +51,10 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+# What ConvertOp puts in front of a conversion's own arguments (the tool is ffmpeg-style).
+# Conversions must not repeat these.  convert/trial.py uses the same list to test.
+TOOL_FLAGS = ("-nostdin", "-hide_banner", "-nostats", "-progress", "pipe:1", "-y")
+
 JSON_FIELDS = ("id", "label", "group", "tool", "inputs", "output_ext", "command", "args", "class")
 
 
@@ -149,6 +153,9 @@ class ConversionRegistry:
 
     def get(self, conversion_id):
         return self._items.get(conversion_id)
+
+    def all_ids(self):
+        return list(self._items)
 
     def all(self):
         return sorted(self._items.values(), key=lambda c: (c.group.lower(), c.label.lower(), c.id))
