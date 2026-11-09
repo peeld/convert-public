@@ -1,8 +1,12 @@
-"""The Ops the C++ host queues: ConvertOp (one file, one conversion) and
-InstallToolOp (download a tool).  Both are asynchronous: start() returns at
+"""The Ops an app queues: ConvertOp (one file, one conversion) and
+InstallToolOp (download a tool).  ConvertOp's work is run.run_conversion(), which needs
+no Op: a worker process can call it directly.  Both are asynchronous: start() returns at
 once and a worker thread calls complete(), fail() or acknowledgeCancel().
 
 Both report progress (setProgress, 0.0 to 1.0) and a status line (setStatus) for the UI.
+
+How many run at once is the queue's job: apply_limits(executor) sets core's per-type
+limit (Executor.setLimit, host API 3).  A ConvertOp waiting for its turn stays READY.
 
 Properties of a ConvertOp (all strings):
     conversion   id of a registered Conversion
@@ -10,24 +14,33 @@ Properties of a ConvertOp (all strings):
     output       full path of the file to write; empty until the output directory is resolved
     conflict     set by the app when another queued file would write the same output
 """
-import collections
 import os
 import re
-import subprocess
-import sys
 import threading
 
 from PeelCore import work
 
-from . import paths, runner, tools
-from .conversion import TOOL_FLAGS, ConversionError, Job, registry
+from . import paths, tools
+from .conversion import ConversionError, registry
+from .run import Cancelled, run_conversion
 
 CONVERT_TYPE = "convert.job"
 INSTALL_TYPE = "tool.install"
 
-_DURATION = re.compile(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)")
 _DOWNLOADED = re.compile(r"downloaded (\d+)%")
-_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+# Most Ops of each type RUNNING at once.  ffmpeg already uses every core, so one
+# conversion at a time; tool downloads are not limited.
+LIMITS = {CONVERT_TYPE: 1}
+
+
+def apply_limits(executor, limits=None):
+    """Give a work executor (core's StepExecutor) the limits: LIMITS, updated by `limits`
+    ({type name: count}, 0 = no limit)."""
+    wanted = dict(LIMITS)
+    wanted.update(limits or {})
+    for type_name, count in wanted.items():
+        executor.setLimit(type_name, int(count))
 
 
 def _prop(op, name, default=""):
@@ -74,9 +87,8 @@ class ConvertOp(work.Op):
         conversion = registry.get(_prop(self, "conversion"))
         exe = tools.find(conversion.tool)
         source, output = _prop(self, "input"), _prop(self, "output")
-        job = Job(input=source, output=paths.temp_name(output), tool_path=exe)
         self._cancel.clear()
-        threading.Thread(target=self._run, args=(conversion, job, output), daemon=True,
+        threading.Thread(target=self._run, args=(conversion, source, output, exe), daemon=True,
                          name="convert-" + os.path.basename(source)).start()
 
     def onCancel(self):
@@ -89,131 +101,36 @@ class ConvertOp(work.Op):
             except OSError:
                 pass
 
-    def _run(self, conversion, job, output):
+    def _track(self, proc):
+        with self._proc_lock:
+            self._proc = proc
+
+    def _log(self, stream, text):
+        self.log(work.LogStream.Stderr if stream == "stderr" else work.LogStream.Stdout, text)
+
+    def _run(self, conversion, source, output, exe):
+        """Worker thread: run.run_conversion() with the Op as its callbacks."""
         try:
-            self.log(work.LogStream.Stdout, "waiting for a free slot")
-            self.setStatus("Waiting for a free slot")
-            if not runner.acquire(self._cancel):
-                self.acknowledgeCancel()
-                return
             try:
-                if conversion.runs_itself:
-                    code, tail = self._execute_own(conversion, job)
-                else:
-                    code, tail = self._execute(conversion, job)
+                written = run_conversion(conversion, source, output, exe, log=self._log,
+                                         progress=self.setProgress, status=self.setStatus,
+                                         cancel=self._cancel, on_process=self._track)
             finally:
-                runner.release()
-            self._finish(code, tail, job, output, conversion)
-        except ConversionError as exc:  # a runs_itself conversion said why it failed
-            _remove(job.output)
-            if self._cancel.is_set():
-                self.acknowledgeCancel()
-            else:
-                self.log(work.LogStream.Stderr, str(exc))
-                self.fail(str(exc))
+                self._track(None)
+            out = work.Params()
+            out.set("output", written)
+            self.complete(out)
+        except Cancelled:
+            self.acknowledgeCancel()
+        except ConversionError as exc:  # the tool failed, or a runs_itself conversion said why
+            self.log(work.LogStream.Stderr, str(exc))
+            self.fail(str(exc))
         except Exception as exc:        # never leave the Op RUNNING
-            _remove(job.output)
             if self._cancel.is_set():
                 self.acknowledgeCancel()
             else:
                 self.log(work.LogStream.Stderr, "%s: %s" % (type(exc).__name__, exc))
                 self.fail("%s: %s" % (type(exc).__name__, exc))
-
-    def _execute(self, conversion, job):
-        os.makedirs(os.path.dirname(job.output), exist_ok=True)
-        argv = [job.tool_path, *TOOL_FLAGS]
-        argv += conversion.build_command(job)
-        self.log(work.LogStream.Stdout, "run: " + " ".join(argv))
-        self.setStatus("Converting")
-        proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                stdin=subprocess.DEVNULL, creationflags=_NO_WINDOW)
-        with self._proc_lock:
-            self._proc = proc
-        if self._cancel.is_set():           # cancelled between the slot and the launch
-            proc.terminate()
-        state = {"duration": 0.0, "last": -1, "pct": -1}
-        tail = collections.deque(maxlen=12)
-        err_thread = threading.Thread(target=self._read_stderr, args=(proc, state, tail), daemon=True)
-        err_thread.start()
-        for raw in proc.stdout:
-            self._progress(raw.decode("utf-8", "replace").strip(), state)
-        code = proc.wait()
-        err_thread.join(5)
-        proc.stdout.close()
-        proc.stderr.close()
-        with self._proc_lock:
-            self._proc = None
-        return code, list(tail)
-
-    def _execute_own(self, conversion, job):
-        """A conversion that does its own work (conversion.runs_itself)."""
-        os.makedirs(os.path.dirname(job.output), exist_ok=True)
-        self.log(work.LogStream.Stdout, "run: %s %s" % (job.tool_path, os.path.basename(job.input)))
-        self.setStatus("Working")
-
-        def track(proc):
-            with self._proc_lock:
-                self._proc = proc
-            if self._cancel.is_set():
-                proc.terminate()
-
-        try:
-            conversion.run(job, self._cancel, track)
-        finally:
-            with self._proc_lock:
-                self._proc = None
-        return 0, []
-
-    def _read_stderr(self, proc, state, tail):
-        for raw in proc.stderr:
-            line = raw.decode("utf-8", "replace").rstrip()
-            if not line:
-                continue
-            match = _DURATION.search(line)
-            if match and not state["duration"]:
-                h, m, s = match.groups()
-                state["duration"] = int(h) * 3600 + int(m) * 60 + float(s)
-            tail.append(line)
-            self.log(work.LogStream.Stderr, line)
-
-    def _progress(self, line, state):
-        # ffmpeg -progress: key=value lines; out_time_us (and the misnamed out_time_ms) are microseconds
-        key, _, value = line.partition("=")
-        if key in ("out_time_us", "out_time_ms") and state["duration"]:
-            try:
-                seconds = int(value) / 1_000_000
-            except ValueError:
-                return
-            fraction = min(1.0, seconds / state["duration"])
-            self.setProgress(fraction)
-            percent = int(fraction * 100)
-            if percent != state["pct"]:
-                state["pct"] = percent
-                self.setStatus("Converting: %d%%" % percent)
-            if percent // 10 > state["last"] // 10:
-                state["last"] = percent
-                self.log(work.LogStream.Stdout, "progress %d%%" % percent)
-
-    def _finish(self, code, tail, job, output, conversion):
-        if self._cancel.is_set():
-            _remove(job.output)
-            self.log(work.LogStream.Stdout, "cancelled")
-            self.setStatus("Cancelled")
-            self.acknowledgeCancel()
-        elif code != 0:
-            _remove(job.output)
-            self.fail("%s exited with code %d: %s" % (conversion.tool, code, " | ".join(tail[-3:])))
-        elif os.path.exists(output):
-            _remove(job.output)
-            self.fail("output exists")
-        else:
-            self.setStatus("Finishing")
-            os.replace(job.output, output)
-            self.log(work.LogStream.Stdout, "wrote " + output)
-            self.setStatus("Done")
-            out = work.Params()
-            out.set("output", output)
-            self.complete(out)
 
 
 class InstallToolOp(work.Op):
@@ -267,13 +184,6 @@ class InstallToolOp(work.Op):
         except Exception as exc:
             self.log(work.LogStream.Stderr, str(exc))
             self.fail(str(exc))
-
-
-def _remove(path):
-    try:
-        os.remove(path)
-    except OSError:
-        pass
 
 
 def register_types(op_registry):

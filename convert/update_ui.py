@@ -1,12 +1,16 @@
-"""Qt side of the updater: dialogs, the Help menu entries, the thread hand-off.
-Logic is in update_service.py; this file only shows things and passes the answers back."""
+"""Qt side of the updater: dialogs, the menu entries, the thread hand-off.
+Logic is in update_service.py; this file only shows things and passes the answers back.
+
+Works in any app: the app passes the window to parent dialogs on, the menu to add
+the entries to, and how to tell it is busy (install_update_service); the app's name
+comes from convert.host."""
 import threading
 
 from PySide6.QtCore import QObject, QProcess, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QApplication, QFileDialog, QMenu, QMessageBox
+from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
-from . import devfolder
+from . import devfolder, host
 from .conversion import user_python_dir
 
 
@@ -36,17 +40,17 @@ class QtUpdateUi:
 
     @staticmethod
     def run_async(fn):
-        threading.Thread(target=fn, daemon=True, name="PeelConvert-update").start()
+        threading.Thread(target=fn, daemon=True, name="update").start()
 
     # ---- ui interface ---------------------------------------------------------------
     def ask_auto(self):
         box = QMessageBox(self.window)
         box.setIcon(QMessageBox.Question)
         box.setWindowTitle("Updates")
-        box.setText("Do you want PeelConvert to check for updates automatically?")
+        box.setText("Do you want %s to check for updates automatically?" % host.app_name())
         box.setInformativeText("New conversions and fixes are downloaded from the project's GitHub releases "
                                "and checked against a signature before use. They take effect the next time "
-                               "the app starts. You can change this under Help.")
+                               "the app starts. You can change this in the menu.")
         yes = box.addButton("Yes, check automatically", QMessageBox.YesRole)
         no = box.addButton("No, I will check myself", QMessageBox.NoRole)
         box.exec()
@@ -69,7 +73,7 @@ class QtUpdateUi:
     def notify_installed(self, version, notes):
         box = QMessageBox(self.window)
         box.setWindowTitle("Updated")
-        box.setText("PeelConvert's conversions were updated to %s." % version)
+        box.setText("%s's operations were updated to %s." % (host.app_name(), version))
         if notes:
             box.setDetailedText(notes)
         restart = box.addButton("Restart now", QMessageBox.AcceptRole)
@@ -77,7 +81,7 @@ class QtUpdateUi:
         service = self.service()
         if service is not None and not service.can_restart_now():
             restart.setEnabled(False)
-            box.setInformativeText("Conversions are running; restart when they finish.")
+            box.setInformativeText("Operations are running; restart when they finish.")
         else:
             box.setInformativeText("Restart to use it.")
         box.exec()
@@ -91,7 +95,7 @@ class QtUpdateUi:
         box = QMessageBox(self.window)
         box.setIcon(QMessageBox.Warning)
         box.setWindowTitle("Update")
-        box.setText("PeelConvert's bundled Python files were changed.")
+        box.setText("%s's bundled Python files were changed." % host.app_name())
         box.setInformativeText("An update would replace those changes. Move your work to the userPython "
                                "folder first, where updates never touch it.")
         box.setDetailedText("\n".join(files))
@@ -121,15 +125,15 @@ class QtUpdateUi:
 
 
 def developer_folder_dialog(window, settings, restart):
-    """Help > Developer folder...: point the app at a clone of convert-public, clone one, or turn it off."""
+    """Developer folder...: point the app at a clone of convert-public, clone one, or turn it off."""
     folder = devfolder.current(settings)
     box = QMessageBox(window)
     box.setWindowTitle("Developer folder")
     box.setText("Developer folder: %s" % (folder or "off"))
-    box.setInformativeText("When set, PeelConvert loads its Python code (conversions, ops) from a clone of the "
+    box.setInformativeText("When set, %s loads its operations (conversions, ops) from a clone of the "
                            "convert-public repository instead of its own copy, so you or your coding agent can "
                            "change an operation and try it on real files. Python changes take effect after a "
-                           "restart; conversion files are re-read by Reload. Updates are paused while it is on.")
+                           "restart; conversion files are re-read by Reload. Updates are paused while it is on." % host.app_name())
     choose = box.addButton("Choose a clone...", QMessageBox.ActionRole)
     clone = box.addButton("Clone it for me...", QMessageBox.ActionRole)
     clone.setEnabled(devfolder.git_available())
@@ -169,7 +173,7 @@ def restart_prompt(window, text, restart):
     box = QMessageBox(window)
     box.setWindowTitle("Developer folder")
     box.setText(text)
-    box.setInformativeText("Restart PeelConvert to apply it.")
+    box.setInformativeText("Restart %s to apply it." % host.app_name())
     now = box.addButton("Restart now", QMessageBox.AcceptRole)
     box.addButton("Later", QMessageBox.RejectRole)
     box.exec()
@@ -177,8 +181,11 @@ def restart_prompt(window, text, restart):
         restart()
 
 
-def install_update_service(window, controller):
-    """Called from convert_startup.install(). Never raises: updates are optional."""
+def install_update_service(window, menu, is_busy=lambda: False):
+    """Start the update service and add its entries to `menu` (a QMenu the app owns, e.g.
+    its Help menu; None adds none).  `window` parents the dialogs; `is_busy()` is true while
+    operations run (no restart then).  Called from the app's startup code.  Returns the
+    service, or None: it never raises, updates are optional."""
     try:
         import _peelhost
         from pathlib import Path
@@ -198,17 +205,16 @@ def install_update_service(window, controller):
         ui = QtUpdateUi(window, lambda: holder.get("service"))
         root = Path(user_data_dir()) / "python"
         service = UpdateService(Host, updater.Settings(user_data_dir() / "settings.json"), updater.State(root),
-                                ui, ui.post, ui.run_async, is_busy=controller.is_busy)
+                                ui, ui.post, ui.run_async, is_busy=is_busy)
         holder["service"] = service
 
-        help_menu = window.findChild(QMenu, "helpMenu")
-        if help_menu is not None:
-            help_menu.addAction("Check for updates...").triggered.connect(lambda: service.run_check(manual=True))
-            auto = help_menu.addAction("Update automatically")
+        if menu is not None:
+            menu.addAction("Check for updates...").triggered.connect(lambda: service.run_check(manual=True))
+            auto = menu.addAction("Update automatically")
             auto.setCheckable(True)
             auto.setChecked(bool(service.settings.get("auto_update")))
             auto.toggled.connect(service.set_auto)
-            help_menu.addAction("Developer folder...").triggered.connect(
+            menu.addAction("Developer folder...").triggered.connect(
                 lambda: developer_folder_dialog(window, service.settings, ui.restart))
         QTimer.singleShot(2000, service.startup)       # after the window is up
         return service

@@ -4,7 +4,6 @@ The output keeps the full input name and adds ".meta", so it never collides with
 converted copy (foo.mp4) and sits next to the source it describes.  The work is done by
 convert/mediainfo.py (ffprobe); its docstring describes the file's layout.
 """
-import os
 
 from convert import Conversion, register
 from convert import mediainfo
@@ -19,10 +18,8 @@ class MediaMeta(Conversion):
     tool = "ffprobe"
     inputs = ()                  # any file: ffprobe decides whether it is media
     output_ext = "meta"
+    output = "{name}.meta"       # a.mov -> a.mov.meta
     runs_itself = True
-
-    def output_name(self, input_path):
-        return os.path.basename(input_path) + ".meta"
 
     def run(self, job, cancel, on_process=None):
         try:

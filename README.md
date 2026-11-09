@@ -1,9 +1,11 @@
 # convert-public
 
-The Python side of PeelConvert: the `convert` package (conversions, ops, tools,
-paths, runner, app wiring), `convert_startup.py`, and the tests.
+The file operations of the Peel apps: the `convert` package (conversions, ops, tools,
+paths, the run code, the updater) and its tests. It runs in any app that mounts it
+(PeelConvert, PeelPost) and asks the app what it needs through `convert/host.py`;
+each app keeps its own window glue.
 
-In the app repo this is mounted as the `python/` submodule. Installed apps ship a
+In PeelConvert's repo this is mounted as the `python/` submodule. Installed apps ship a
 bundled copy and can fetch newer signed releases of this repo.
 
 - `AGENTS.md` - how to add or change operations (for coding agents and people)

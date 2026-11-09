@@ -1,26 +1,32 @@
 {
   "files": {
-    "convert/__init__.py": "9ede8dd3675b9e070700436194b864c157f6a2948eeb0e0730faea4220706d88",
+    "convert/__init__.py": "7b7c59267d8e13d5ec44590262e8bf9c9e4d647819d0e7606bd964233ec7a105",
     "convert/__main__.py": "d6c44137a8c0c43e7adcf7570f87ec9d4db0aa8c797778d658bea2ec215d3402",
-    "convert/app.py": "9159a87ff8f94cfd9e59a0717f36edc236004406c75a3c37254c4b1da6213af1",
-    "convert/check.py": "a0b3bfc99032aeab56f6ec63980990061b3950280a984dc90381dc8b7f4d2700",
-    "convert/conversion.py": "51ec1a623d52e45c9b3a41ef3879fa3ac8e830e3a1bb7f5a302731ff55955d62",
+    "convert/check.py": "5d08a72362ce28f5da55dd4c49712aa549787c548e0c47b41bc7cc5157037652",
+    "convert/conversion.py": "0fa46bae651f482a20a2be3a001e5555fa3a45c2120f259b0b5c80a0357b1a41",
+    "convert/conversions/fbx_meta.py": "5d10990b02cf1200532013d6136b4a6bba32d9093f1c623d5f32bc3b9e1164a5",
     "convert/conversions/ffmpeg.json": "84130421a68cb5ebf6710752c7ff82c1ee4b111b937ffaa4a3bddb9e1dc75b57",
-    "convert/devfolder.py": "58ec6199c5ca866f105aa65c9f2173f70d2331339fd45680d7e9823bc995d325",
-    "convert/ops.py": "e23e3ce877230f1298e28efdb67a06e40e926a82c4767138a20bfd5ef4bd28fc",
+    "convert/conversions/metadata.py": "077f5f249af683a13fa54f38d2aa9a0c62dfd45a726e3b334dcfd7d1c2470e6e",
+    "convert/conversions/timecode_ops.py": "0b4280faed22e62e8da41fc1308a1830eacd444b86859cc071d549eef1fe9837",
+    "convert/devfolder.py": "891231d216b75139aac22977f522c5c65f94aae506fd667e88ac99f697630403",
+    "convert/fbxinfo.py": "11531f2f9ce07e9d37461f7a1ae81ba04e3be3fdfb66b5e317cf650208b9808f",
+    "convert/host.py": "3206468a67874e3af93897dcda6ed170d2f7665f72df7bd1b678d9f62812d5d8",
+    "convert/mediainfo.py": "a4bb8a8d1331386a23c51df1b225aefff5daa0e56e389cccf31e9f505de317b0",
+    "convert/ops.py": "9dd579883fe4806c1f9d2f460d1e48085fd17225e16093965a9588dcfbdd3b14",
     "convert/paths.py": "555bc176e060087eae44bd275617edcbc39b7558e56ebc530d902ef2df816d7a",
-    "convert/runner.py": "1866eecb108cb24f5a2621fd008b28384ec1f4c19ec287e8c7340618fa365893",
-    "convert/tools.json": "6295a0a9e86e6abce131c8f2c28b382386c57d0f9ca0f12d6761a2fb9b664e14",
-    "convert/tools.py": "45cde890f7631675bf74b32f0a492ddb25c825d1c32e233ab119db06a685fb52",
+    "convert/run.py": "a63c084757af4cb2725bacdee696e97b4ca9f07082190442c5d94a8f53574b9c",
+    "convert/timecode.py": "d70a8c32a788ead5505d55e142683d602102857ec8fb2b6c3dd17d4d1a30b303",
+    "convert/tools.json": "24522bcd92a78187d64d1883a6de9fc62b7afa9694a7d971ea7047f7ac8c3f9b",
+    "convert/tools.py": "87a9b54872fd3d2d2739eeb86c38ab316eb39bdb66d6aff039650b62aafd39bc",
     "convert/update_service.py": "d6c60bb093255a6e7d5a74c3180c6f8f86013666c916a666d2b39d2ce23c7533",
-    "convert/update_ui.py": "dba8b34fbc893b9b9231f0439e93d4cdce500c543bf944566671629b09c65883",
-    "convert/updater.py": "a00b26478d6c0e490c08563d1746e00908bb47c4c7eb255a642b770cad34e894",
-    "convert_startup.py": "082ea692c28dfda47dedef2ef7bd1fde1c0f835d0836e449f126b37a64f19ab5",
-    "manifest.json": "c85aa3995fe23157b6f6877644f703681c27350e9e643fdc37c9d2fe1cf9054a"
+    "convert/update_ui.py": "57b083a72d8a879beb160ef9f481718faa55dc8d39fee935a18c91a9ff11c934",
+    "convert/updater.py": "4f1d5ce63aadcddcca427f7e3a553bdd9f049fb9f507d96dd387dad86a665714",
+    "convert/user_startup.py": "126929b0e00a75f1c6fa9c76d38da599ac84cbbb9e2e7d550b375d02ac12aead",
+    "manifest.json": "7b737e892745dd6788447ac40e7bd3f076c3cd3165bfc931af03b85ae4f0d306"
   },
   "host_api": {
-    "max": 1,
-    "min": 1
+    "max": 3,
+    "min": 3
   },
   "version": "0.1.0"
 }

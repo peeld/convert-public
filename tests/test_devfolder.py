@@ -13,7 +13,7 @@ from convert import devfolder, updater  # noqa: E402
 
 def make_repo(root):
     (root / "convert").mkdir(parents=True)
-    for f in ("convert/__init__.py", "convert_startup.py", "manifest.json"):
+    for f in ("convert/__init__.py", "manifest.json"):
         (root / f).write_text("")
 
 

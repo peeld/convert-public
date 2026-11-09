@@ -49,6 +49,14 @@ class Cancelled(Exception):
     pass
 
 
+
+def _user_agent():
+    from . import host
+    try:
+        return host.app_name()
+    except host.HostError:
+        return "convert-public"
+
 def platform_key():
     machine = platform.machine().lower()
     arch = "x86_64" if machine in ("amd64", "x86_64") else ("arm64" if machine in ("arm64", "aarch64") else machine)
@@ -75,6 +83,14 @@ def manifest():
     return merged
 
 
+def host_path(name):
+    """The app's own copy, when it says which (PEEL_TOOL_FFMPEG=<path>, the name upper
+    case with - as _): an app that ships or finds its tools itself sets it for the
+    operations it runs, ahead of the user's settings.json."""
+    value = os.environ.get("PEEL_TOOL_" + name.upper().replace("-", "_"))
+    return value if value and os.path.isfile(value) else None
+
+
 def configured_path(name):
     value = _read_json(user_data_dir() / "settings.json").get("tools", {}).get(name)
     return value if value and os.path.isfile(value) else None
@@ -98,6 +114,9 @@ def find(name):
     """Full path to the tool, or None.  BUILTIN is reported as the interpreter."""
     if name == BUILTIN:
         return sys.executable or BUILTIN
+    path = host_path(name)
+    if path:
+        return path
     path = configured_path(name)
     if path:
         return path
@@ -140,7 +159,7 @@ def install_problems(name):
 
 
 def _fetch(url, dest, progress, cancel):
-    request = urllib.request.Request(url, headers={"User-Agent": "PeelConvert"})
+    request = urllib.request.Request(url, headers={"User-Agent": _user_agent()})
     with urllib.request.urlopen(request, timeout=30) as response, open(dest, "wb") as out:
         total = int(response.headers.get("Content-Length") or 0)
         done = 0
@@ -187,7 +206,7 @@ def _expected_hash(spec):
     if spec.get("sha256"):
         return spec["sha256"].strip().lower()
     filename = spec.get("sha256_name") or spec["url"].rsplit("/", 1)[-1]
-    request = urllib.request.Request(spec["sha256_url"], headers={"User-Agent": "PeelConvert"})
+    request = urllib.request.Request(spec["sha256_url"], headers={"User-Agent": _user_agent()})
     with urllib.request.urlopen(request, timeout=30) as response:
         text = response.read(1024 * 1024).decode("utf-8", "replace")
     found = parse_checksums(text, filename)

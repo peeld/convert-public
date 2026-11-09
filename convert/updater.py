@@ -1,16 +1,16 @@
 """Self-update of the Python side, from signed GitHub releases.
 
 Pure logic: every outside effect is passed in, so it is tested without network, Qt
-or the exe.  The host (C++ / convert_startup) supplies:
+or the exe.  The host (the app, through update_ui.py) supplies:
 
     fetch_json(url) -> dict          GET and parse JSON (the GitHub releases API)
     download(url) -> bytes           GET a release asset
     verify(data, signature) -> bool  Ed25519 check against the two public keys compiled into the exe
     run_check(folder) -> bool        load every conversion from `folder` (like --python-check)
 
-Layout under the update root (%APPDATA%/PeelConvert/python):
+Layout under the update root (<app user data>/python):
 
-    versions/<version>/...           unpacked releases (convert/, convert_startup.py, manifest.json)
+    versions/<version>/...           unpacked releases (convert/, manifest.json)
     state.json                       see State below; C++ reads this to pick the folder at startup
 
 State (state.json):
@@ -146,7 +146,7 @@ def install(update, running_version, host_api, state, download, verify, run_chec
     if listing.get("version") != version:
         raise UpdateError("file list is for another version")
     if not compatible({"host_api": listing.get("host_api", {})}, host_api):
-        raise UpdateError("needs a newer PeelConvert (host API)")
+        raise UpdateError("needs a newer version of the app (host API)")
 
     with zipfile.ZipFile(io.BytesIO(download(update["zip_url"]))) as z:
         wanted = listing["files"]
@@ -288,6 +288,14 @@ ALLOWED_PREFIXES = ("https://api.github.com/repos/peeld/convert-public/",
 MAX_BYTES = 50 * 1024 * 1024
 
 
+def _user_agent():
+    from . import host
+    try:
+        return host.app_name() + "-updater"
+    except host.HostError:
+        return "convert-public-updater"
+
+
 def https_get(url, timeout=20):
     """GET `url` (only the project's own GitHub release URLs, over https) and return the bytes."""
     import urllib.request
@@ -295,7 +303,7 @@ def https_get(url, timeout=20):
     # signature on the file list is what decides whether the content is trusted.
     if not url.startswith(ALLOWED_PREFIXES):
         raise UpdateError("refusing to fetch " + url)
-    req = urllib.request.Request(url, headers={"User-Agent": "PeelConvert-updater", "Accept": "application/vnd.github+json, */*"})
+    req = urllib.request.Request(url, headers={"User-Agent": _user_agent(), "Accept": "application/vnd.github+json, */*"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         data = resp.read(MAX_BYTES + 1)
     if len(data) > MAX_BYTES:

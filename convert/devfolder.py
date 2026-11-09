@@ -1,7 +1,7 @@
 """The developer folder: a clone of convert-public that the app loads instead of its bundled
 copy, so a person (or their coding agent) can change operations and try them on real files.
-Off by default.  Stored in settings.json as {"python": {"developer_folder": "C:/..."}}; the C++
-loader (src/pythonSource.cpp) reads it at startup, so a change takes effect on the next start.
+Off by default.  Stored in settings.json as {"python": {"developer_folder": "C:/..."}}; the app's
+loader (core's pythonhost/pythonSource.cpp) reads it at startup, so a change takes effect on the next start.
 (Reload re-reads conversion JSON from the running folder, but Python code needs a restart.)
 """
 import shutil
@@ -18,7 +18,7 @@ def problems(folder):
     if not p.is_dir():
         return ["not a folder"]
     out = []
-    for name in ("convert/__init__.py", "convert_startup.py", "manifest.json"):
+    for name in ("convert/__init__.py", "manifest.json"):
         if not (p / name).is_file():
             out.append("missing " + name)
     return out

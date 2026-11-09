@@ -18,6 +18,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE / "fakecore"))
 
+from faketool import make_tool                        # noqa: E402
 from convert import conversion as conv_mod            # noqa: E402
 from convert import paths                             # noqa: E402
 from convert.conversion import Conversion, ConversionRegistry, Job   # noqa: E402
@@ -122,6 +123,52 @@ class ConversionTests(unittest.TestCase):
         self.assertGreaterEqual(len(r.all()), 9)
         self.assertIsNotNone(r.get("video.to-mp4"))
 
+    def test_output_template(self):
+        c = mp4()
+        self.assertEqual(c.output_name("/a/take 1.mov"), "take 1.mp4")     # default {stem}.<output_ext>
+        c.output = "{stem}.tc.mov"
+        self.assertEqual(c.output_name("/a/take.mov"), "take.tc.mov")
+        c.output = "{name}.meta"
+        self.assertEqual(c.output_name("/a/take.mov"), "take.mov.meta")
+        c.output = "{stem}_{ext}.mp4"
+        self.assertEqual(c.output_name("take.MOV"), "take_MOV.mp4")
+        self.assertEqual(c.problems(), [])
+
+    def test_bad_output_and_version(self):
+        for output, words in (("{stem}.{bogus}", "unknown"), ("sub/{stem}.x", "file name"),
+                              ("same.mp4", "{stem} or {name}")):
+            c = mp4()
+            c.output = output
+            self.assertTrue(any(words in p for p in c.problems()), (output, c.problems()))
+        for version in (0, "2", 1.5, True):
+            c = mp4()
+            c.version = version
+            self.assertIn("version must be a whole number, 1 or more", c.problems())
+
+    def test_describe_is_plain_data(self):
+        c = mp4()
+        c.inputs = ("MOV", ".mkv")
+        c.version = 3
+        d = c.describe()
+        self.assertEqual(d["inputs"], ["mkv", "mov"])
+        self.assertEqual((d["output"], d["version"]), ("{stem}.mp4", 3))
+        self.assertFalse(d["python_accepts"] or d["python_output"])
+        json.dumps(d)                                    # nothing but JSON values
+
+        class Picky(Conversion):
+            def accepts(self, path):
+                return True
+        self.assertTrue(Picky().describe()["python_accepts"])
+
+    def test_shipped_meta_conversions_name_by_data(self):
+        r = conv_mod.registry               # the .py conversions @register into this one
+        r.load_all()
+        self.assertEqual(r.problems, [])
+        for d in r.describe():
+            self.assertFalse(d["python_accepts"] or d["python_output"], d["id"])
+        meta = r.get("media.meta")
+        self.assertEqual(meta.output_name("/x/clip.mov"), "clip.mov.meta")
+
 
 class LoadingTests(unittest.TestCase):
     def setUp(self):
@@ -153,6 +200,16 @@ class LoadingTests(unittest.TestCase):
         r = self.load()
         self.assertEqual([c.id for c in r.all()], ["ok"])
         self.assertEqual(len(r.problems), 3)
+
+    def test_json_output_and_version(self):
+        self.write("v.json", """[{"id":"v","label":"V","group":"G","output_ext":"mov","output":"{stem}.tc.mov",
+                                  "version":2,"command":["{input}","{output}"]},
+                                 {"id":"n","label":"N","group":"G","output_ext":"x","output":5,"command":["{input}","{output}"]}]""")
+        r = self.load()
+        v = r.get("v")
+        self.assertEqual((v.version, v.output_name("a.mov")), (2, "a.tc.mov"))
+        self.assertIsNone(r.get("n"))
+        self.assertEqual(len(r.problems), 1)
 
     def test_python_file_registers_with_decorator(self):
         self.write("mine.py", """
@@ -217,7 +274,7 @@ class UserPythonTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.old_appdata = os.environ.get("APPDATA")
         os.environ["APPDATA"] = self.tmp.name
-        self.root = Path(self.tmp.name) / "PeelConvert"
+        self.root = Path(self.tmp.name) / "TestApp"
 
     def tearDown(self):
         if self.old_appdata is None:
@@ -269,8 +326,7 @@ class UserPythonTests(unittest.TestCase):
         self.assertEqual(r.overrides, set())
 
 
-FAKE_FFMPEG = r'''#!{python}
-import sys, time
+FAKE_FFMPEG = r'''import sys, time
 args = sys.argv[1:]
 out = args[-1]
 mode = open(out.rsplit(".converting", 1)[0] + ".mode").read().strip() if False else "ok"
@@ -297,11 +353,9 @@ class OpTestBase(unittest.TestCase):
         self.appdata.mkdir()
         self._env = dict(os.environ)
         os.environ["APPDATA"] = str(self.appdata)
-        fake = self.root / "ffmpeg"
-        fake.write_text(FAKE_FFMPEG.format(python=sys.executable))
-        fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
-        (self.appdata / "PeelConvert").mkdir()
-        (self.appdata / "PeelConvert" / "settings.json").write_text(json.dumps({"tools": {"ffmpeg": str(fake)}}))
+        fake = make_tool(self.root, "ffmpeg", FAKE_FFMPEG)
+        (self.appdata / "TestApp").mkdir()
+        (self.appdata / "TestApp" / "settings.json").write_text(json.dumps({"tools": {"ffmpeg": str(fake)}}))
         conv_mod.registry.clear()
         conv_mod.registry.register(mp4())
         from convert import ops
@@ -346,7 +400,6 @@ class OpTests(OpTestBase):
         self.run_op(op)
         self.assertEqual(op.progress(), 1.0)
         self.assertEqual(op.status(), "Done")
-        self.assertIn("Waiting for a free slot", op.status_history)
         self.assertIn("Converting: 50%", op.status_history)
 
     def test_failure_leaves_no_file(self):
@@ -357,6 +410,7 @@ class OpTests(OpTestBase):
         self.assertFalse(out.exists())
         self.assertFalse(list(out.parent.glob("*")))
 
+    @unittest.skipIf(sys.platform == "win32", "the fake tool is a .cmd wrapper: terminate() stops cmd.exe, not its Python child, which keeps the pipe open")
     def test_cancel_kills_the_process_and_removes_the_part_file(self):
         op, src, out = self.make("SLOW")
         self.assertTrue(op.launch(self.work.Params(), {}))
@@ -387,7 +441,7 @@ class OpTests(OpTestBase):
         self.assertIn("input file not found", op.validationProblems())
 
     def test_missing_tool_is_reported(self):
-        (self.appdata / "PeelConvert" / "settings.json").write_text("{}")
+        (self.appdata / "TestApp" / "settings.json").write_text("{}")
         from convert import tools
         orig = tools.shutil.which
         tools.shutil.which = lambda name: None
@@ -397,20 +451,21 @@ class OpTests(OpTestBase):
         finally:
             tools.shutil.which = orig
 
-    def test_slots_run_one_at_a_time(self):
-        from convert import runner
-        import threading
-        cancel = threading.Event()
-        self.assertTrue(runner.acquire(cancel))
-        got = []
-        t = threading.Thread(target=lambda: got.append(runner.acquire(cancel)))
-        t.start()
-        t.join(0.4)
-        self.assertTrue(t.is_alive(), "second acquire should wait for the slot")
-        cancel.set()
-        t.join(2)
-        self.assertEqual(got, [False])
-        runner.release()
+    def test_apply_limits(self):
+        from convert import ops
+
+        class Executor:                     # records what core's StepExecutor would be told
+            def __init__(self):
+                self.limits = {}
+
+            def setLimit(self, type_name, count):
+                self.limits[type_name] = count
+
+        ex = Executor()
+        ops.apply_limits(ex)
+        self.assertEqual(ex.limits, {ops.CONVERT_TYPE: 1})      # one conversion at a time
+        ops.apply_limits(ex, {ops.CONVERT_TYPE: 3, ops.INSTALL_TYPE: 1})
+        self.assertEqual(ex.limits, {ops.CONVERT_TYPE: 3, ops.INSTALL_TYPE: 1})
 
 
 class ToolTests(unittest.TestCase):
@@ -452,13 +507,13 @@ class ToolTests(unittest.TestCase):
         saved = os.environ.get("APPDATA")
         try:
             os.environ["APPDATA"] = tmp.name
-            (Path(tmp.name) / "PeelConvert").mkdir()
+            (Path(tmp.name) / "TestApp").mkdir()
             bin_dir = Path(tmp.name) / "bin"
             bin_dir.mkdir()
             names = ["ffmpeg.exe", "ffprobe.exe"] if sys.platform == "win32" else ["ffmpeg", "ffprobe"]
             for name in names:
                 (bin_dir / name).write_text("x")
-            (Path(tmp.name) / "PeelConvert" / "settings.json").write_text(
+            (Path(tmp.name) / "TestApp" / "settings.json").write_text(
                 json.dumps({"tools": {"ffmpeg": str(bin_dir / names[0])}}))
             self.assertEqual(Path(tools.find("ffprobe")), bin_dir / names[1])
         finally:
@@ -565,8 +620,7 @@ class MediaInfoTests(unittest.TestCase):
             self.assertNotIn(key, m["video"][0])
 
 
-FAKE_FFPROBE = r"""#!{python}
-import json, sys
+FAKE_FFPROBE = r"""import json, sys
 args = sys.argv[1:]
 path = args[args.index("-i") + 1]
 text = open(path).read()
@@ -585,10 +639,8 @@ print(json.dumps({{"format": {{"format_name": "mov", "duration": "2.0"}}, "strea
 class MetaOpTests(OpTestBase):
     def setUp(self):
         super().setUp()
-        fake = self.root / "ffprobe"
-        fake.write_text(FAKE_FFPROBE.format(python=sys.executable))
-        fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
-        settings = self.appdata / "PeelConvert" / "settings.json"
+        fake = make_tool(self.root, "ffprobe", FAKE_FFPROBE.format())
+        settings = self.appdata / "TestApp" / "settings.json"
         data = json.loads(settings.read_text())
         data["tools"]["ffprobe"] = str(fake)
         settings.write_text(json.dumps(data))
@@ -633,6 +685,7 @@ class MetaOpTests(OpTestBase):
         self.assertFalse(out.exists())
         self.assertEqual(list(self.root.glob("*.converting*")), [])
 
+    @unittest.skipIf(sys.platform == "win32", "the fake tool is a .cmd wrapper: terminate() stops cmd.exe, not its Python child, which keeps the pipe open")
     def test_cancel_stops_ffprobe(self):
         op, src, out = self.make_meta("SLOW")
         self.assertTrue(op.launch(self.work.Params(), {}))

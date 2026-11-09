@@ -17,11 +17,11 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE / "fakecore"))
 
-from convert import agent_service, mcp_server, mcp_tools      # noqa: E402
+from faketool import make_tool                                # noqa: E402
+from convert import agent_service, host, mcp_server, mcp_tools   # noqa: E402
 from convert.conversion import ConversionRegistry, user_dir   # noqa: E402
 
-FAKE_FFMPEG = r'''#!{python}
-import sys
+FAKE_FFMPEG = r'''import sys
 a = sys.argv[1:]
 out = a[-1]
 if "-encoders" in a:
@@ -58,11 +58,9 @@ class Base(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self._env = dict(os.environ)
         os.environ["APPDATA"] = str(self.root / "appdata")
-        fake = self.root / "ffmpeg"
-        fake.write_text(FAKE_FFMPEG.format(python=sys.executable))
-        fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
-        data = self.root / "appdata" / "PeelConvert"
-        data.mkdir(parents=True)
+        fake = make_tool(self.root, "ffmpeg", FAKE_FFMPEG)
+        data = host.user_data_dir()          # the app's folder: TestApp under the fake _peelhost
+        data.mkdir(parents=True, exist_ok=True)
         (data / "settings.json").write_text(json.dumps({"tools": {"ffmpeg": str(fake)}}))
         self.handler = mcp_server.Handler()
         mcp_tools._tested.clear()
@@ -218,7 +216,7 @@ class TrialTests(Base):
         self.assertTrue(result["ok"], result)
         self.assertEqual(result["output"]["name"], "sample.ogg")
         self.assertGreater(result["output"]["bytes"], 0)
-        self.assertEqual(result["command"][0], "ffmpeg")              # the command is reported
+        self.assertEqual(os.path.splitext(result["command"][0])[0], "ffmpeg")   # the command is reported (.exe/.cmd aside)
         _, saved = call(self.handler, "save_conversion", definition=GOOD)
         self.assertEqual(saved["warnings"], [])
 
@@ -247,7 +245,7 @@ class TrialTests(Base):
         self.assertTrue(result["ok"], result)
 
     def test_missing_tool_is_a_clear_error(self):
-        (self.root / "appdata" / "PeelConvert" / "settings.json").write_text("{}")
+        (host.user_data_dir() / "settings.json").write_text("{}")
         old = os.environ["PATH"]
         os.environ["PATH"] = ""
         try:
